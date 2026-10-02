@@ -3,7 +3,7 @@
  * Fichiers de l'application : cache d'abord. R (webR) et ses paquets : cache séparé, conservé entre versions.
  * Changer VERSION à chaque publication pour forcer la mise à jour des fichiers de l'application.
  */
-const VERSION = 'console-r-v4';
+const VERSION = 'console-r-v5';
 const RUNTIME = 'console-r-runtime';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css', 'js/app.js',

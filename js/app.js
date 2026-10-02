@@ -338,7 +338,7 @@ editor.value = store.get('script', DEFAULT_SCRIPT);
 let saveT = 0;
 editor.addEventListener('input', () => {
   clearTimeout(saveT);
-  saveT = setTimeout(() => { store.set('script', editor.value); if (typeof autosaveCurrent === 'function') autosaveCurrent(); }, 400);
+  saveT = setTimeout(() => { if (typeof syncSheet === 'function') syncSheet(); if (typeof autosaveCurrent === 'function') autosaveCurrent(); }, 400);
 });
 
 function runAll() {
@@ -400,7 +400,8 @@ function touch(e) { const i = sessions.indexOf(e); if (i >= 0 && i !== sessions.
 function snapshotScript() {
   const code = editor.value.replace(/\s+$/, '');
   if (!code.trim()) return;
-  const name = current || 'Sans titre', now = Date.now();
+  let label = ''; try { label = sheet()?.label || ''; } catch (e) { /* feuilles pas encore prêtes */ }
+  const name = current || label || 'Sans titre', now = Date.now();
   const e = sessions.find((x) => x.id === scriptSid);
   if (e && e.code === code && e.name === name) return; // rien n'a changé
   if (e && now - e.t < SESSION_GAP) { e.code = code; e.name = name; e.t = now; touch(e); }
@@ -411,13 +412,8 @@ function snapshotScript() {
   store.set('scriptSid', scriptSid);
   saveSessions();
 }
-// Remplace le contenu de l'éditeur : le script en cours part d'abord dans l'historique
-function replaceScript(code, name = '') {
-  snapshotScript();
-  scriptSid = newSid(); store.set('scriptSid', scriptSid);
-  editor.value = code; store.set('script', code);
-  setCurrent(name);
-}
+// Ouvre du code dans une nouvelle feuille (onglet) ; le script quitté part d'abord dans l'historique
+function replaceScript(code, name = '', sid, label = '') { newSheet(code, name, sid, label); }
 function recordCmd(code) {
   code = code.replace(/\s+$/, '');
   if (!code.trim()) return;
@@ -511,7 +507,7 @@ EXAMPLES.forEach(([name], i) => { const o = document.createElement('option'); o.
 exSel.addEventListener('change', () => {
   const ex = EXAMPLES[+exSel.value]; exSel.value = '';
   if (!ex) return;
-  replaceScript(ex[1], '');
+  replaceScript(ex[1], '', undefined, ex[0]);
   setMenu(false); setView('script');
 });
 
@@ -534,7 +530,7 @@ $('#rc-upload').addEventListener('change', async (e) => {
 $('#rc-open-script').addEventListener('change', async (e) => {
   const f = e.target.files[0]; e.target.value = '';
   if (!f) return;
-  replaceScript(await f.text(), f.name.replace(/\.(r|txt)$/i, ''));
+  replaceScript(await f.text(), '', undefined, f.name.replace(/\.(r|txt)$/i, ''));
   setMenu(false); setView('script');
 });
 $('#rc-clear').addEventListener('click', () => { out.innerHTML = ''; setMenu(false); setView('console'); });
@@ -629,9 +625,11 @@ $('#hi-list').addEventListener('click', async (ev) => {
   const a = ev.target.closest('button')?.dataset.a;
   if (!a) { it.classList.toggle('open'); return; }
   if (a === 'open') {
-    replaceScript(e.code, ''); // ouvert sans nom : un script enregistré n'est pas écrasé par mégarde
-    if (e.kind === 'script') scriptSid = e.id; // continuer ce script met à jour la même entrée
-    store.set('scriptSid', scriptSid); setView('script'); toast('Script ouvert dans l’éditeur');
+    const open = e.kind === 'script' && sheets.find((x) => x.sid === e.id);
+    if (open) switchSheet(open.id);
+    // ouvert sans nom (un script enregistré n'est pas écrasé par mégarde) ; le modifier met à jour la même entrée
+    else replaceScript(e.code, '', e.kind === 'script' ? e.id : undefined);
+    setView('script'); toast('Script ouvert dans un nouvel onglet');
   } else if (a === 'run') { setView('console'); runCode(e.code); }
   else if (a === 'dl') saveFile(entryFile(e), e.code + '\n', 'text/plain');
   else if (a === 'copy') {
@@ -647,7 +645,7 @@ function historyAsR() {
 $('#hi-export').addEventListener('click', () => saveFile(`historique_${stamp()}.R`, historyAsR(), 'text/plain'));
 $('#hi-clear').addEventListener('click', () => {
   if (!sessions.length || !confirm('Effacer tout l’historique ?')) return;
-  sessions.length = 0; scriptSid = newSid(); consoleSid = newSid(); store.set('scriptSid', scriptSid); saveSessions(); renderHistory();
+  sessions.length = 0; scriptSid = newSid(); consoleSid = newSid(); syncSheet(); saveSessions(); renderHistory();
 });
 
 // ------------------------------------------------------------------ mes scripts, notes, exports
@@ -680,7 +678,7 @@ $('#fi-save').addEventListener('click', () => {
   if (!$('#fi-name').value.trim()) { $('#fi-name').focus(); return; }
   if (scripts[n] && n !== current && !confirm(`Remplacer le script « ${n} » ?`)) return;
   scripts[n] = { code: editor.value, t: Date.now() }; store.set('scripts', scripts);
-  setCurrent(n); renderScripts(); toast(`Script « ${n} » enregistré`);
+  setCurrent(n); syncSheet(); renderScripts(); toast(`Script « ${n} » enregistré`);
 });
 $('#fi-new').addEventListener('click', () => {
   replaceScript('', ''); renderScripts(); setView('script'); editor.focus();
@@ -688,10 +686,17 @@ $('#fi-new').addEventListener('click', () => {
 $('#fi-scripts').addEventListener('click', (e) => {
   const r = e.target.closest('.fi-row'); const a = e.target.closest('button')?.dataset.a; if (!r || !a) return;
   const n = r.dataset.n;
-  if (a === 'open') { replaceScript(scripts[n].code, n); setView('script'); }
+  if (a === 'open') {
+    const open = sheets.find((x) => x.linked === n);
+    if (open) switchSheet(open.id); else replaceScript(scripts[n].code, n);
+    setView('script');
+  }
   else if (a === 'dl') saveFile(`${n}.R`, scripts[n].code, 'text/plain');
   else if (a === 'del' && confirm(`Supprimer le script « ${n} » ?`)) {
-    delete scripts[n]; store.set('scripts', scripts); if (n === current) setCurrent(''); renderScripts();
+    delete scripts[n]; store.set('scripts', scripts);
+    sheets.forEach((x) => { if (x.linked === n) x.linked = ''; });
+    if (n === current) setCurrent('');
+    syncSheet(); renderScripts();
   }
 });
 
@@ -719,7 +724,7 @@ const EXPORTS = {
   console: () => saveFile(`console_${stamp()}.txt`, out.innerText, 'text/plain'),
   report: () => saveFile(`rapport_${stamp()}.html`, reportHTML(), 'text/html'),
   history: () => saveFile(`historique_${stamp()}.R`, historyAsR(), 'text/plain'),
-  all: () => saveFile(`console-r_sauvegarde_${stamp()}.json`, JSON.stringify({ app: 'console-r', v: 1, t: Date.now(), script: editor.value, scripts, notes: notes.value, sessions }, null, 1), 'application/json'),
+  all: () => saveFile(`console-r_sauvegarde_${stamp()}.json`, JSON.stringify({ app: 'console-r', v: 1, t: Date.now(), script: editor.value, sheets, scripts, notes: notes.value, sessions }, null, 1), 'application/json'),
 };
 document.querySelectorAll('[data-export]').forEach((b) => b.addEventListener('click', () => EXPORTS[b.dataset.export]()));
 $('#fi-import').addEventListener('change', async (e) => {
@@ -768,7 +773,79 @@ $('#fi-rfiles').addEventListener('click', async (e) => {
   try { const data = await webR.FS.readFile(`${HOME}/${d.dataset.f}`); await saveFile(d.dataset.f.split('/').pop(), new Blob([data]), 'application/octet-stream'); }
   catch (err) { toast('Lecture du fichier impossible'); }
 });
-setCurrent(current);
+// ------------------------------------------------------------------ feuilles de script (onglets)
+// Plusieurs scripts ouverts en même temps, comme les onglets de RStudio. Chaque feuille a sa propre entrée d'historique.
+const sheets = store.get('sheets', null) || [{ id: newSid(), n: 1, code: store.get('script', DEFAULT_SCRIPT), linked: current, sid: scriptSid }];
+let active = store.get('activeSheet', '');
+if (!sheets.some((x) => x.id === active)) active = sheets[0].id;
+const sheet = () => sheets.find((x) => x.id === active);
+function sheetTitle(x) {
+  if (x.linked) return x.linked;
+  if (x.label) return x.label;
+  const com = x.code.split('\n').map((l) => l.trim()).find((l) => /^#+\s*\S/.test(l));
+  return com ? com.replace(/^#+\s*/, '') : `Script ${x.n}`;
+}
+function syncSheet() {
+  const x = sheet(); if (!x) return;
+  x.code = editor.value; x.linked = current; x.sid = scriptSid;
+  store.set('sheets', sheets); store.set('activeSheet', active);
+  renderTabs();
+}
+function loadSheet(id) {
+  active = id; const x = sheet();
+  editor.value = x.code; scriptSid = x.sid || newSid(); setCurrent(x.linked);
+  store.set('activeSheet', active); renderTabs();
+}
+function switchSheet(id) {
+  if (id === active) return;
+  snapshotScript(); syncSheet(); loadSheet(id);
+}
+function newSheet(code = '', name = '', sid = newSid(), label = '') {
+  snapshotScript(); syncSheet();
+  const x = { id: newSid(), n: Math.max(0, ...sheets.map((y) => y.n || 0)) + 1, code, linked: name, sid, label };
+  sheets.splice(sheets.indexOf(sheet()) + 1, 0, x);
+  loadSheet(x.id); syncSheet();
+  return x;
+}
+function closeSheet() {
+  const x = sheet();
+  if (x.code.trim() && !x.linked && !confirm(`Fermer « ${sheetTitle(x)} » ? (il reste dans l’Historique)`)) return;
+  snapshotScript();
+  const i = sheets.indexOf(x);
+  sheets.splice(i, 1);
+  if (!sheets.length) sheets.push({ id: newSid(), n: 1, code: '', linked: '', sid: newSid() });
+  loadSheet(sheets[Math.min(i, sheets.length - 1)].id); syncSheet();
+}
+function renderTabs() {
+  const bar = $('#sh-tabs'); if (!bar) return;
+  bar.replaceChildren(...sheets.map((x) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'sh-tab'; b.dataset.id = x.id; b.setAttribute('role', 'tab');
+    b.setAttribute('aria-selected', String(x.id === active));
+    const t = document.createElement('span'); t.className = 'sh-name'; t.textContent = sheetTitle(x); b.appendChild(t);
+    if (x.id === active) {
+      b.title = 'Toucher pour nommer et enregistrer';
+      const c = document.createElement('span'); c.className = 'sh-close'; c.textContent = '×'; c.setAttribute('aria-label', 'Fermer l’onglet'); c.setAttribute('role', 'button');
+      b.appendChild(c);
+    }
+    return b;
+  }), Object.assign(document.createElement('button'), { type: 'button', className: 'sh-add', textContent: '+', title: 'Nouvel onglet', ariaLabel: 'Nouvel onglet' }));
+  bar.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+$('#sh-tabs').addEventListener('click', (e) => {
+  if (e.target.closest('.sh-add')) { newSheet(); editor.focus(); return; }
+  const b = e.target.closest('.sh-tab'); if (!b) return;
+  if (b.dataset.id !== active) { switchSheet(b.dataset.id); return; }
+  if (e.target.closest('.sh-close')) { closeSheet(); return; }
+  // onglet déjà actif : le nommer l'enregistre dans « Mes scripts »
+  const n = prompt('Nom du script (il sera enregistré dans Mes scripts) :', current || sheetTitle(sheet()));
+  if (!n || !n.trim()) return;
+  const name = safeName(n);
+  if (scripts[name] && name !== current && !confirm(`Remplacer le script « ${name} » ?`)) return;
+  scripts[name] = { code: editor.value, t: Date.now() }; store.set('scripts', scripts);
+  setCurrent(name); syncSheet(); toast(`Script « ${name} » enregistré`);
+});
+loadSheet(active);
 
 // ------------------------------------------------------------------ paquets
 const REPOS = ['https://repo.r-wasm.org/', 'https://cran.r-universe.dev/'];
