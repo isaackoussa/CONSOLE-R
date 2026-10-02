@@ -177,6 +177,7 @@ function status(text, cls) { statusEl.textContent = text; statusEl.className = c
 const VIEWS = ['script', 'console', 'hist', 'files', 'pkgs'];
 function setView(v) {
   if (!VIEWS.includes(v)) v = 'console';
+  if (main.dataset.view === 'script' && v !== 'script' && typeof snapshotScript === 'function') snapshotScript();
   main.dataset.view = v;
   document.querySelectorAll('.rc-nav button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.view === v)));
   $('#rc-keys').hidden = v !== 'script' && v !== 'console';
@@ -343,8 +344,8 @@ editor.addEventListener('input', () => {
 function runAll() {
   const code = editor.value;
   if (!code.trim()) return;
+  snapshotScript();
   if (!wide.matches) setView('console');
-  record(code, 'script');
   runCode(code);
 }
 function runSelection() {
@@ -361,7 +362,6 @@ function runSelection() {
   }
   if (!code.trim()) return;
   if (!wide.matches) setView('console');
-  record(code, 'script');
   runCode(code);
 }
 $('#rc-run-all').addEventListener('click', runAll);
@@ -373,20 +373,65 @@ editor.addEventListener('keydown', (e) => {
 
 // ------------------------------------------------------------------ console interactive
 let pending = '';
-// Historique : chaque code exécuté (console, script, relance) est gardé avec sa date, 1000 entrées au plus
-const journal = store.get('journal', null) || store.get('history', []).map((c) => ({ c, t: 0, s: 'console' }));
-const history = journal.map((j) => j.c); // pour ↑/↓ dans la console
-let hIdx = history.length;
-function record(code, src) {
+// Historique par script : un script quitté (changement d'onglet, fermeture, autre script ouvert) ou lancé en entier
+// devient une entrée ; les commandes tapées dans la console pendant une séance forment, elles aussi, un seul script.
+const SESSION_GAP = 30 * 60e3; // au-delà de 30 min sans activité, une nouvelle entrée commence
+const newSid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+function migrateJournal(journal) {
+  const out = [];
+  for (const j of journal) {
+    const last = out[out.length - 1];
+    if (j.s === 'script') { if (!last || last.code !== j.c) out.push({ id: newSid(), kind: 'script', name: 'Sans titre', code: j.c, t0: j.t, t: j.t }); }
+    else if (last && last.kind === 'console' && j.t - last.t < SESSION_GAP) { last.code += `\n${j.c}`; last.t = j.t; }
+    else out.push({ id: newSid(), kind: 'console', name: 'Console', code: j.c, t0: j.t, t: j.t });
+  }
+  return out;
+}
+const sessions = store.get('sessions', null) || migrateJournal(store.get('journal', []));
+const cmds = store.get('cmds', null) || store.get('journal', []).filter((j) => j.s === 'console').map((j) => j.c); // ↑/↓ dans la console
+let hIdx = cmds.length;
+let scriptSid = store.get('scriptSid', '') || newSid();
+let consoleSid = newSid(); // une séance de console par ouverture de l'application
+function saveSessions() {
+  if (sessions.length > 300) sessions.splice(0, sessions.length - 300);
+  store.set('sessions', sessions);
+}
+function touch(e) { const i = sessions.indexOf(e); if (i >= 0 && i !== sessions.length - 1) { sessions.splice(i, 1); sessions.push(e); } }
+function snapshotScript() {
+  const code = editor.value.replace(/\s+$/, '');
+  if (!code.trim()) return;
+  const name = current || 'Sans titre', now = Date.now();
+  const e = sessions.find((x) => x.id === scriptSid);
+  if (e && e.code === code && e.name === name) return; // rien n'a changé
+  if (e && now - e.t < SESSION_GAP) { e.code = code; e.name = name; e.t = now; touch(e); }
+  else {
+    if (e) { scriptSid = newSid(); store.set('scriptSid', scriptSid); }
+    sessions.push({ id: scriptSid, kind: 'script', name, code, t0: now, t: now });
+  }
+  store.set('scriptSid', scriptSid);
+  saveSessions();
+}
+// Remplace le contenu de l'éditeur : le script en cours part d'abord dans l'historique
+function replaceScript(code, name = '') {
+  snapshotScript();
+  scriptSid = newSid(); store.set('scriptSid', scriptSid);
+  editor.value = code; store.set('script', code);
+  setCurrent(name);
+}
+function recordCmd(code) {
   code = code.replace(/\s+$/, '');
   if (!code.trim()) return;
-  const last = journal[journal.length - 1];
-  if (last && last.c === code) { last.t = Date.now(); last.s = src; }
-  else { journal.push({ c: code, t: Date.now(), s: src }); history.push(code); }
-  if (journal.length > 1000) { journal.splice(0, journal.length - 1000); history.splice(0, history.length - 1000); }
-  hIdx = history.length;
-  store.set('journal', journal);
+  if (cmds[cmds.length - 1] !== code) { cmds.push(code); if (cmds.length > 500) cmds.splice(0, cmds.length - 500); store.set('cmds', cmds); }
+  hIdx = cmds.length;
+  const now = Date.now();
+  let e = sessions.find((x) => x.id === consoleSid);
+  if (e && now - e.t > SESSION_GAP) { consoleSid = newSid(); e = null; }
+  if (e) { e.code += `\n${code}`; e.t = now; touch(e); }
+  else sessions.push({ id: consoleSid, kind: 'console', name: 'Console', code, t0: now, t: now });
+  saveSessions();
 }
+addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') snapshotScript(); });
+addEventListener('pagehide', snapshotScript);
 const ps = $('#rc-ps');
 function autoGrow() { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight + 2, innerHeight * 0.3)}px`; }
 input.addEventListener('input', autoGrow);
@@ -395,7 +440,7 @@ async function submit() {
   const line = input.value;
   if (!line.trim() && !pending) return;
   input.value = ''; autoGrow();
-  hIdx = history.length;
+  hIdx = cmds.length;
   const code = pending ? `${pending}\n${line}` : line;
   const st = await runCode(code, { partial: true });
   if (st === 'incomplete') {
@@ -404,7 +449,7 @@ async function submit() {
     p.textContent = code.split('\n').map((l, i) => (i ? '+ ' : '> ') + l).join('\n'); c.appendChild(p); c.dataset.pending = '1'; scrollEnd();
   } else {
     pending = ''; ps.textContent = '>';
-    record(code, 'console');
+    recordCmd(code);
   }
   // l'écho provisoire d'une saisie incomplète est remplacé par celui de l'exécution
   if (st !== 'incomplete') out.querySelectorAll('.rc-cell[data-pending]').forEach((c) => c.remove());
@@ -412,9 +457,9 @@ async function submit() {
 }
 $('#rc-form').addEventListener('submit', (e) => { e.preventDefault(); submit(); });
 function browseHistory(dir) {
-  if (!history.length) return;
-  hIdx = Math.max(0, Math.min(history.length, hIdx + dir));
-  input.value = history[hIdx] ?? ''; autoGrow();
+  if (!cmds.length) return;
+  hIdx = Math.max(0, Math.min(cmds.length, hIdx + dir));
+  input.value = cmds[hIdx] ?? ''; autoGrow();
   const n = input.value.length; input.setSelectionRange(n, n);
 }
 input.addEventListener('keydown', (e) => {
@@ -466,7 +511,7 @@ EXAMPLES.forEach(([name], i) => { const o = document.createElement('option'); o.
 exSel.addEventListener('change', () => {
   const ex = EXAMPLES[+exSel.value]; exSel.value = '';
   if (!ex) return;
-  editor.value = ex[1]; store.set('script', editor.value);
+  replaceScript(ex[1], '');
   setMenu(false); setView('script');
 });
 
@@ -489,8 +534,7 @@ $('#rc-upload').addEventListener('change', async (e) => {
 $('#rc-open-script').addEventListener('change', async (e) => {
   const f = e.target.files[0]; e.target.value = '';
   if (!f) return;
-  editor.value = await f.text(); store.set('script', editor.value);
-  setCurrent(f.name.replace(/\.(r|txt)$/i, ''));
+  replaceScript(await f.text(), f.name.replace(/\.(r|txt)$/i, ''));
   setMenu(false); setView('script');
 });
 $('#rc-clear').addEventListener('click', () => { out.innerHTML = ''; setMenu(false); setView('console'); });
@@ -544,55 +588,66 @@ function dayLabel(t) {
   const diff = Math.round((today - new Date(d).setHours(0, 0, 0, 0)) / 864e5);
   return diff === 0 ? 'Aujourd’hui' : diff === 1 ? 'Hier' : d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 }
-const SRC = { console: 'console', script: 'script', relance: 'relancé' };
+const lineCount = (c) => c.split('\n').length;
+// Script sans nom : son premier commentaire sert de titre, sinon l'heure
+function autoTitle(e) {
+  if (e.name && e.name !== 'Sans titre') return e.name;
+  const com = e.code.split('\n').map((l) => l.trim()).find((l) => /^#+\s*\S/.test(l));
+  return com ? com.replace(/^#+\s*/, '').slice(0, 60) : `Script de ${fmtTime(e.t0 || e.t).replace(':', 'h')}`;
+}
 function renderHistory() {
+  snapshotScript();
   const q = $('#hi-q').value.trim().toLowerCase();
   const list = $('#hi-list');
-  const items = journal.map((j, i) => ({ ...j, i })).filter((j) => !q || j.c.toLowerCase().includes(q)).reverse();
-  $('#hi-count').textContent = journal.length
-    ? `${items.length} entrée${items.length > 1 ? 's' : ''}${q ? ' trouvée' + (items.length > 1 ? 's' : '') : ''} · touchez un code pour le voir en entier`
-    : 'Aucun code exécuté pour l’instant. Tout ce que vous lancez (console ou script) apparaîtra ici.';
+  const items = sessions.map((e, i) => ({ e, i })).filter(({ e }) => !q || e.code.toLowerCase().includes(q) || e.name.toLowerCase().includes(q)).reverse();
+  $('#hi-count').textContent = sessions.length
+    ? `${items.length} script${items.length > 1 ? 's' : ''}${q ? ' trouvé' + (items.length > 1 ? 's' : '') : ''} · touchez un script pour le voir en entier`
+    : 'Rien pour l’instant. Chaque script que vous quittez ou lancez, et chaque séance de console, apparaîtra ici en un seul bloc.';
   list.replaceChildren();
   let day = null;
-  for (const j of items.slice(0, 300)) {
-    const dl = dayLabel(j.t);
+  for (const { e, i } of items.slice(0, 200)) {
+    const dl = dayLabel(e.t);
     if (dl !== day) { day = dl; const h = document.createElement('div'); h.className = 'hi-day'; h.textContent = dl; list.appendChild(h); }
-    const it = document.createElement('div'); it.className = 'hi-item'; it.dataset.i = j.i;
-    it.innerHTML = `<div class="hi-meta"><span class="hi-src">${SRC[j.s] || j.s}</span><span>${fmtTime(j.t)}</span></div>
-      <pre></pre><div class="hi-btns"><button type="button" data-a="run">▶ Relancer</button><button type="button" class="ghost" data-a="console">Console</button>
-      <button type="button" class="ghost" data-a="script">+ Script</button><button type="button" class="ghost" data-a="copy">Copier</button>
+    const it = document.createElement('div'); it.className = 'hi-item'; it.dataset.i = i;
+    const n = lineCount(e.code), when = e.t0 && fmtTime(e.t0) !== fmtTime(e.t) ? `${fmtTime(e.t0)} → ${fmtTime(e.t)}` : fmtTime(e.t);
+    it.innerHTML = `<div class="hi-head"><span class="hi-kind ${e.kind}">${e.kind === 'console' ? 'Console' : 'Script'}</span><b class="hi-name"></b></div>
+      <div class="hi-meta"><span>${n} ligne${n > 1 ? 's' : ''}</span><span>${when}</span></div>
+      <pre></pre><div class="hi-btns"><button type="button" data-a="open">Ouvrir dans Script</button><button type="button" class="ghost" data-a="run">▶ Relancer</button>
+      <button type="button" class="ghost" data-a="dl" aria-label="Enregistrer sur le téléphone">⤓ .R</button><button type="button" class="ghost" data-a="copy">Copier</button>
       <button type="button" class="ghost" data-a="del" aria-label="Supprimer">✕</button></div>`;
-    it.querySelector('pre').textContent = j.c;
+    it.querySelector('.hi-name').textContent = e.kind === 'console' ? `séance du ${new Date(e.t0 || e.t).toLocaleDateString('fr-FR')}` : autoTitle(e);
+    it.querySelector('pre').textContent = e.code;
     list.appendChild(it);
   }
-  if (items.length > 300) list.insertAdjacentHTML('beforeend', `<p class="pk-hint">… ${items.length - 300} entrées plus anciennes : affinez la recherche.</p>`);
+  if (items.length > 200) list.insertAdjacentHTML('beforeend', `<p class="pk-hint">… ${items.length - 200} scripts plus anciens : affinez la recherche.</p>`);
 }
 $('#hi-q').addEventListener('input', renderHistory);
-$('#hi-list').addEventListener('click', async (e) => {
-  const it = e.target.closest('.hi-item'); if (!it) return;
-  const j = journal[+it.dataset.i]; if (!j) return;
-  const a = e.target.closest('button')?.dataset.a;
+const entryFile = (e) => `${safeName(e.kind === 'console' ? 'console' : autoTitle(e))}_${new Date(e.t).toISOString().slice(0, 10)}.R`;
+$('#hi-list').addEventListener('click', async (ev) => {
+  const it = ev.target.closest('.hi-item'); if (!it) return;
+  const e = sessions[+it.dataset.i]; if (!e) return;
+  const a = ev.target.closest('button')?.dataset.a;
   if (!a) { it.classList.toggle('open'); return; }
-  if (a === 'run') { setView('console'); record(j.c, 'relance'); runCode(j.c); }
-  else if (a === 'console') { input.value = j.c; autoGrow(); setView('console'); input.focus(); }
-  else if (a === 'script') {
-    editor.value = editor.value.replace(/\n*$/, '\n\n') + j.c + '\n'; editor.dispatchEvent(new Event('input'));
-    setView('script'); toast('Ajouté à la fin du script');
-  } else if (a === 'copy') {
-    try { await navigator.clipboard.writeText(j.c); toast('Copié'); } catch (err) { toast('Copie impossible'); }
-  } else if (a === 'del') {
-    journal.splice(+it.dataset.i, 1); history.splice(0, history.length, ...journal.map((x) => x.c)); hIdx = history.length;
-    store.set('journal', journal); renderHistory();
+  if (a === 'open') {
+    replaceScript(e.code, ''); // ouvert sans nom : un script enregistré n'est pas écrasé par mégarde
+    if (e.kind === 'script') scriptSid = e.id; // continuer ce script met à jour la même entrée
+    store.set('scriptSid', scriptSid); setView('script'); toast('Script ouvert dans l’éditeur');
+  } else if (a === 'run') { setView('console'); runCode(e.code); }
+  else if (a === 'dl') saveFile(entryFile(e), e.code + '\n', 'text/plain');
+  else if (a === 'copy') {
+    try { await navigator.clipboard.writeText(e.code); toast('Copié'); } catch (err) { toast('Copie impossible'); }
+  } else if (a === 'del' && confirm('Supprimer ce script de l’historique ?')) {
+    sessions.splice(+it.dataset.i, 1); saveSessions(); renderHistory();
   }
 });
 function historyAsR() {
-  return `# Historique Console R — exporté le ${new Date().toLocaleString('fr-FR')}\n\n` +
-    journal.map((j) => `# ${j.t ? new Date(j.t).toLocaleString('fr-FR') : ''} (${SRC[j.s] || j.s})\n${j.c}\n`).join('\n');
+  return `# Historique Console R — exporté le ${new Date().toLocaleString('fr-FR')}\n\n` + sessions.map((e) =>
+    `# ==== ${e.kind === 'console' ? 'Console' : `Script : ${autoTitle(e)}`} — ${new Date(e.t).toLocaleString('fr-FR')}\n${e.code}\n`).join('\n');
 }
 $('#hi-export').addEventListener('click', () => saveFile(`historique_${stamp()}.R`, historyAsR(), 'text/plain'));
 $('#hi-clear').addEventListener('click', () => {
-  if (!journal.length || !confirm('Effacer tout l’historique ?')) return;
-  journal.length = 0; history.length = 0; hIdx = 0; store.set('journal', journal); renderHistory();
+  if (!sessions.length || !confirm('Effacer tout l’historique ?')) return;
+  sessions.length = 0; scriptSid = newSid(); consoleSid = newSid(); store.set('scriptSid', scriptSid); saveSessions(); renderHistory();
 });
 
 // ------------------------------------------------------------------ mes scripts, notes, exports
@@ -628,12 +683,12 @@ $('#fi-save').addEventListener('click', () => {
   setCurrent(n); renderScripts(); toast(`Script « ${n} » enregistré`);
 });
 $('#fi-new').addEventListener('click', () => {
-  editor.value = ''; store.set('script', ''); setCurrent(''); renderScripts(); setView('script'); editor.focus();
+  replaceScript('', ''); renderScripts(); setView('script'); editor.focus();
 });
 $('#fi-scripts').addEventListener('click', (e) => {
   const r = e.target.closest('.fi-row'); const a = e.target.closest('button')?.dataset.a; if (!r || !a) return;
   const n = r.dataset.n;
-  if (a === 'open') { editor.value = scripts[n].code; store.set('script', editor.value); setCurrent(n); setView('script'); }
+  if (a === 'open') { replaceScript(scripts[n].code, n); setView('script'); }
   else if (a === 'dl') saveFile(`${n}.R`, scripts[n].code, 'text/plain');
   else if (a === 'del' && confirm(`Supprimer le script « ${n} » ?`)) {
     delete scripts[n]; store.set('scripts', scripts); if (n === current) setCurrent(''); renderScripts();
@@ -664,7 +719,7 @@ const EXPORTS = {
   console: () => saveFile(`console_${stamp()}.txt`, out.innerText, 'text/plain'),
   report: () => saveFile(`rapport_${stamp()}.html`, reportHTML(), 'text/html'),
   history: () => saveFile(`historique_${stamp()}.R`, historyAsR(), 'text/plain'),
-  all: () => saveFile(`console-r_sauvegarde_${stamp()}.json`, JSON.stringify({ app: 'console-r', v: 1, t: Date.now(), script: editor.value, scripts, notes: notes.value, journal }, null, 1), 'application/json'),
+  all: () => saveFile(`console-r_sauvegarde_${stamp()}.json`, JSON.stringify({ app: 'console-r', v: 1, t: Date.now(), script: editor.value, scripts, notes: notes.value, sessions }, null, 1), 'application/json'),
 };
 document.querySelectorAll('[data-export]').forEach((b) => b.addEventListener('click', () => EXPORTS[b.dataset.export]()));
 $('#fi-import').addEventListener('change', async (e) => {
@@ -675,10 +730,9 @@ $('#fi-import').addEventListener('change', async (e) => {
     if (d.app !== 'console-r') throw new Error('format');
     Object.assign(scripts, d.scripts || {}); store.set('scripts', scripts);
     if (d.notes && d.notes !== notes.value) { notes.value = notes.value ? `${notes.value}\n\n${d.notes}` : d.notes; store.set('notes', notes.value); }
-    const seen = new Set(journal.map((j) => `${j.t}|${j.c}`));
-    for (const j of d.journal || []) if (!seen.has(`${j.t}|${j.c}`)) journal.push(j);
-    journal.sort((a, b) => a.t - b.t); history.splice(0, history.length, ...journal.map((j) => j.c)); hIdx = history.length;
-    store.set('journal', journal);
+    const seen = new Set(sessions.map((x) => x.id));
+    for (const x of d.sessions || migrateJournal(d.journal || [])) if (!seen.has(x.id)) sessions.push(x);
+    sessions.sort((a, b) => a.t - b.t); saveSessions();
     renderScripts(); toast('Sauvegarde restaurée');
   } catch (err) { toast('Fichier de sauvegarde invalide'); }
 });

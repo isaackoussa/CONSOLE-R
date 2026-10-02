@@ -223,7 +223,13 @@ body.rc {
 .hi-day { font-family: var(--f-display); font-weight: 600; font-size: 14px; color: var(--ink-2); margin-top: 6px; }
 .hi-item { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 8px 10px; display: grid; gap: 6px; min-width: 0; }
 .hi-meta { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--ink-3); }
-.hi-src { font-family: var(--f-mono); text-transform: uppercase; letter-spacing: 0.05em; font-size: 10.5px; }
+.hi-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.hi-kind {
+  flex: none; font-family: var(--f-mono); text-transform: uppercase; letter-spacing: 0.05em; font-size: 10.5px; font-weight: 500;
+  padding: 2px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent);
+}
+.hi-kind.console { background: var(--panel-2); color: var(--ink-2); }
+.hi-name { font-weight: 600; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hi-item pre {
   margin: 0; font-family: var(--f-mono); font-size: 13px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere;
   max-height: 8.6em; overflow: hidden; color: var(--ink);
