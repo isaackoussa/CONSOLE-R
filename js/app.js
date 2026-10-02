@@ -90,8 +90,28 @@ local({
       return(invisible())
     }
     absent <- setdiff(miss, rownames(info))
-    if (length(absent)) message("Paquet introuvable dans les dépôts : ", paste(absent, collapse = ", "),
-      " (vérifiez l'orthographe et les majuscules, ou il n'existe pas en version WebAssembly)")
+    # nom approchant : majuscules (fbasics → fBasics), début du nom, ou faute de frappe
+    near <- function(p) {
+      n <- rownames(info); lp <- tolower(p)
+      m <- n[tolower(n) == lp]
+      if (!length(m)) m <- n[startsWith(tolower(n), lp)]
+      if (!length(m)) m <- agrep(p, n, value = TRUE, ignore.case = TRUE, max.distance = 0.2)
+      utils::head(m[order(nchar(m))], 4)
+    }
+    # noms de fonctions souvent pris pour des paquets → paquet qui les contient
+    fun2pkg <- c(basicstats = "fBasics", basicstat = "fBasics", auto.arima = "forecast", autoarima = "forecast",
+      adf.test = "tseries", kpss.test = "tseries", garch = "tseries", ur.df = "urca", ugarchfit = "rugarch",
+      garchfit = "fGarch", ggplot = "ggplot2", read_excel = "readxl", read_csv = "readr", skewness = "moments",
+      kurtosis = "moments", jarque.bera.test = "tseries", lmer = "lme4", pca = "FactoMineR", acp = "FactoMineR",
+      coeftest = "lmtest", bptest = "lmtest", dwtest = "lmtest", vif = "car", xts = "xts", zoo = "zoo")
+    for (p in absent) {
+      m <- near(p)
+      f <- fun2pkg[[tolower(p), exact = TRUE]]
+      if (!is.null(f)) m <- unique(c(paste0(f, " (", p, " est une fonction de ce paquet)"), m))
+      message("Paquet introuvable dans les dépôts : ", p,
+        if (length(m)) paste0("\n  → Vouliez-vous dire : ", paste(m, collapse = ", "), " ? (R distingue les majuscules)")
+        else " (vérifiez l'orthographe et les majuscules, ou il n'existe pas en version WebAssembly)")
+    }
     todo <- intersect(miss, rownames(info))
     if (length(todo)) suppressWarnings(try(webr::install(todo, info = info), silent = TRUE))
     still <- todo[!vapply(todo, installed, logical(1))]
@@ -673,6 +693,19 @@ async function computeSuggest(el, force) {
   if (token.length >= 2 && !accessMode) {
     for (const [k, body, detail] of SNIPPETS) if (k.startsWith(token)) items.push({ kind: 'snip', label: k, body, detail });
   }
+  // dans library(…), require(…), install.packages("…") : tous les paquets du dépôt, pas seulement ceux installés
+  const pkgCall = /\b(library|require|requireNamespace|install\.packages)\(\s*["']?([\w.]*)$/.exec(line);
+  if (pkgCall) {
+    if (!pkgState.index) loadIndex();
+    const q = pkgCall[2].toLowerCase();
+    if (pkgState.index && q) {
+      const have = new Set(comps);
+      const names = [...pkgState.index.keys()].filter((n) => n.toLowerCase().startsWith(q) && !have.has(n))
+        .sort((a, b) => a.length - b.length || a.localeCompare(b)).slice(0, 15);
+      for (const n of names) items.push({ kind: 'pkg', label: n });
+      token = pkgCall[2];
+    }
+  }
   for (const c of comps.slice(0, 40)) items.push({ kind: /=\s*$/.test(c) ? 'arg' : /\($/.test(c) ? 'fun' : 'obj', label: c });
   // noms déjà écrits dans le script (variables pas encore exécutées), après ceux que R connaît
   if (token.length >= 2 && !accessMode) {
@@ -689,7 +722,7 @@ function showSuggest(el, token, items, sig) {
   listEl.replaceChildren(...items.map((it, i) => {
     const b = document.createElement('button');
     b.type = 'button'; b.className = `sg-item ${it.kind}${i === 0 ? ' sel' : ''}`; b.dataset.i = i;
-    b.innerHTML = `<span class="sg-k">${{ snip: '⚡', arg: '=', fun: 'ƒ', obj: '◆' }[it.kind]}</span><span></span>${it.detail ? `<small>${esc(it.detail)}</small>` : ''}`;
+    b.innerHTML = `<span class="sg-k">${{ snip: '⚡', arg: '=', fun: 'ƒ', obj: '◆', pkg: '📦' }[it.kind]}</span><span></span>${it.detail ? `<small>${esc(it.detail)}</small>` : ''}`;
     b.children[1].textContent = it.kind === 'fun' ? it.label.replace(/\($/, '()') : it.label.replace(/\s*=\s*$/, ' =');
     return b;
   }));
