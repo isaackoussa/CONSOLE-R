@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<title>Console R</title>
+<meta name="description" content="R complet dans le navigateur (webR), pensé pour le téléphone : script, console, graphiques et des milliers de paquets CRAN.">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1b2f5c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Console R">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body class="rc">
+<header class="rc-top">
+  <span class="rc-back"><img class="app-icon" src="icons/icon.svg" alt="" width="36" height="36"></span>
+  <div class="rc-title"><span>Console R</span><small id="rc-status" role="status">Démarrage…</small></div>
+  <div class="seg rc-tabs" role="tablist" aria-label="Vue">
+    <button type="button" role="tab" id="tab-script" aria-controls="pane-script" aria-pressed="false">Script</button>
+    <button type="button" role="tab" id="tab-console" aria-controls="pane-console" aria-pressed="true">Console</button>
+    <button type="button" role="tab" id="tab-pkgs" aria-controls="pane-pkgs" aria-pressed="false">Paquets</button>
+  </div>
+  <button class="ghost rc-menu-btn" id="rc-menu-btn" type="button" aria-expanded="false" aria-controls="rc-menu" aria-label="Outils">⋯</button>
+</header>
+
+<div class="rc-menu" id="rc-menu" hidden>
+  <label class="rc-menu-item">Exemple
+    <select id="rc-examples"><option value="">— choisir —</option></select>
+  </label>
+  <label class="btn ghost rc-file">Importer un fichier (CSV, Excel, RDS…)<input id="rc-upload" type="file" hidden></label>
+  <button type="button" class="ghost" id="rc-download-script">Enregistrer le script (.R)</button>
+  <label class="btn ghost rc-file">Ouvrir un script (.R)<input id="rc-open-script" type="file" accept=".R,.r,.txt" hidden></label>
+  <button type="button" class="ghost" id="rc-clear">Effacer la console</button>
+  <button type="button" class="ghost" id="rc-restart">Redémarrer R</button>
+  <button type="button" class="ghost" id="rc-theme">Thème : auto</button>
+  <button type="button" class="ghost" id="rc-install" hidden>Installer l’application</button>
+  <p class="rc-note">R tourne entièrement dans votre téléphone (webR) : aucune donnée n’est envoyée. Les paquets appelés par
+    <code>library()</code> s’installent seuls ; l’onglet Paquets donne accès à tout le dépôt webR (plusieurs milliers de paquets CRAN).
+    Aide : <code>?mean</code> ou <code>help(lm)</code>.</p>
+</div>
+
+<main class="rc-main" data-view="console">
+  <section class="rc-pane" id="pane-script" aria-labelledby="tab-script">
+    <textarea id="rc-editor" class="rc-editor" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="Script R"></textarea>
+    <div class="rc-actions">
+      <button type="button" id="rc-run-all">▶ Tout exécuter</button>
+      <button type="button" class="ghost" id="rc-run-sel">▶ Ligne / sélection</button>
+    </div>
+  </section>
+  <section class="rc-pane" id="pane-console" aria-labelledby="tab-console">
+    <div class="rc-out" id="rc-out" aria-live="polite"></div>
+    <form class="rc-prompt" id="rc-form" autocomplete="off">
+      <span class="rc-ps" id="rc-ps" aria-hidden="true">&gt;</span>
+      <textarea id="rc-input" rows="1" enterkeyhint="send" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Commande R"></textarea>
+      <button type="submit" id="rc-send" aria-label="Exécuter">▶</button>
+    </form>
+  </section>
+  <section class="rc-pane" id="pane-pkgs" aria-labelledby="tab-pkgs">
+    <div class="pk" id="pk">
+      <div class="pk-search">
+        <input type="search" id="pk-q" placeholder="Chercher un paquet (ex. ggplot2, lme4…)" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Chercher un paquet">
+        <button type="button" id="pk-go">Installer</button>
+      </div>
+      <p class="pk-hint" id="pk-info">Touchez un paquet pour l’installer et le charger (<code>library()</code>).</p>
+      <div id="pk-results" hidden><h2>Résultats</h2><div class="pk-list" id="pk-res-list"></div></div>
+      <label class="pk-opt"><input type="checkbox" id="pk-restore"> Réinstaller mes paquets à chaque démarrage (depuis le cache, hors ligne possible)</label>
+      <div><h2>Installés</h2><div class="pk-list" id="pk-installed"><span class="pk-hint">R démarre…</span></div></div>
+      <div id="pk-catalog"></div>
+    </div>
+  </section>
+</main>
+<div class="rc-keys" id="rc-keys" aria-label="Touches R"></div>
+<script src="js/app.js" type="module"></script>
+</body>
+</html>
