@@ -787,6 +787,29 @@ $('#rc-restart').addEventListener('click', async () => {
 });
 
 let resizeT = 0;
+// Clavier virtuel : sur iPhone, Safari ne réduit pas la page quand le clavier s'ouvre, il la recouvre.
+// On cale la page sur la zone réellement visible (visualViewport) : barre de touches et suggestions
+// restent au-dessus du clavier ; la barre d'onglets du bas est masquée pendant la frappe.
+(() => {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  let full = vv.height;
+  const typing = () => { const a = document.activeElement; return !!a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && !['checkbox', 'file'].includes(a.type))); };
+  const fit = () => {
+    if (!typing()) full = vv.height; // hauteur sans clavier (suit aussi les rotations)
+    const kb = typing() && vv.height < full - 120;
+    document.body.classList.toggle('kb-open', kb);
+    document.body.classList.add('vv');
+    document.documentElement.style.setProperty('--vvh', `${Math.round(vv.height)}px`);
+    document.documentElement.style.setProperty('--vvt', `${Math.round(vv.offsetTop)}px`);
+    if (kb && window.scrollY) window.scrollTo(0, 0); // Safari fait parfois défiler la page derrière le clavier
+  };
+  vv.addEventListener('resize', fit);
+  vv.addEventListener('scroll', fit);
+  document.addEventListener('focusin', () => setTimeout(fit, 50));
+  document.addEventListener('focusout', () => setTimeout(fit, 120));
+  fit();
+})();
 addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { if (webR) enqueue(syncWidth).catch(() => {}); }, 300); });
 
 // ------------------------------------------------------------------ enregistrement sur le téléphone
