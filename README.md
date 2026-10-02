@@ -15,6 +15,16 @@ R complet dans le navigateur, pensé pour le téléphone. R 4 est compilé en We
   Option : réinstaller automatiquement ses paquets à chaque démarrage (depuis le cache).
 - **Fichiers** : import depuis le téléphone (CSV, Excel, RDS, SPSS/Stata/SAS, JSON…) dans le répertoire de travail.
 - **Aide** : `?mean`, `help(lm)` affichent la page d’aide dans la console.
+- **Historique** : tout ce qui est exécuté (console ou script) est gardé avec la date et l’heure (1000 entrées),
+  classé par jour, avec recherche ; pour chaque code : relancer, remettre dans la console, ajouter au script, copier, supprimer.
+- **Fichiers** :
+  - *Mes scripts* : scripts nommés gardés dans l’application (ouvrir, enregistrer, supprimer) ;
+  - *Mes notes* : bloc-notes enregistré automatiquement ;
+  - *Enregistrer sur le téléphone* : script (.R), notes (.txt), console (.txt), rapport avec graphiques (.html),
+    historique (.R), sauvegarde complète (.json, restaurable). Sur téléphone, la feuille de partage s’ouvre
+    (Fichiers, Notes, Drive, WhatsApp…), sinon le fichier va dans Téléchargements ;
+  - *Fichiers créés par R* (`write.csv`, `saveRDS`, `png`…) à enregistrer d’un geste ; dans le code,
+    `enregistrer("resultats.csv")` envoie directement le fichier sur le téléphone.
 - Barre de touches R au-dessus du clavier : `<-`, `|>`, parenthèses, crochets, `$`, `~`, `#`…
 - Thème clair/sombre, exemples prêts à lancer (régression, tests, dplyr, ggplot2, ACP, lme4, survie, rpart, forecast…).
 
@@ -42,9 +52,9 @@ python3 -m http.server 8000   # puis ouvrir http://localhost:8000
 ## Structure
 
 ```
-index.html            coque de l'application (onglets Script, Console, Paquets)
+index.html            coque de l'application (onglets Script, Console, Historique, Fichiers, Paquets)
 css/app.css           thème clair/sombre, mise en page mobile
-js/app.js             démarrage de webR, exécution, graphiques, paquets, menu
+js/app.js             démarrage de webR, exécution, graphiques, historique, fichiers, paquets, menu
 sw.js                 service worker (hors ligne, cache de R et des paquets)
 manifest.webmanifest  application installable
 icons/                icônes

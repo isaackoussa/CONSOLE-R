@@ -20,12 +20,7 @@
 <body class="rc">
 <header class="rc-top">
   <span class="rc-back"><img class="app-icon" src="icons/icon.svg" alt="" width="36" height="36"></span>
-  <div class="rc-title"><span>Console R</span><small id="rc-status" role="status">Démarrage…</small></div>
-  <div class="seg rc-tabs" role="tablist" aria-label="Vue">
-    <button type="button" role="tab" id="tab-script" aria-controls="pane-script" aria-pressed="false">Script</button>
-    <button type="button" role="tab" id="tab-console" aria-controls="pane-console" aria-pressed="true">Console</button>
-    <button type="button" role="tab" id="tab-pkgs" aria-controls="pane-pkgs" aria-pressed="false">Paquets</button>
-  </div>
+  <div class="rc-title"><span>Console R <em id="rc-script-name"></em></span><small id="rc-status" role="status">Démarrage…</small></div>
   <button class="ghost rc-menu-btn" id="rc-menu-btn" type="button" aria-expanded="false" aria-controls="rc-menu" aria-label="Outils">⋯</button>
 </header>
 
@@ -34,8 +29,7 @@
     <select id="rc-examples"><option value="">— choisir —</option></select>
   </label>
   <label class="btn ghost rc-file">Importer un fichier (CSV, Excel, RDS…)<input id="rc-upload" type="file" hidden></label>
-  <button type="button" class="ghost" id="rc-download-script">Enregistrer le script (.R)</button>
-  <label class="btn ghost rc-file">Ouvrir un script (.R)<input id="rc-open-script" type="file" accept=".R,.r,.txt" hidden></label>
+  <label class="btn ghost rc-file">Ouvrir un script (.R) du téléphone<input id="rc-open-script" type="file" accept=".R,.r,.txt,text/plain" hidden></label>
   <button type="button" class="ghost" id="rc-clear">Effacer la console</button>
   <button type="button" class="ghost" id="rc-restart">Redémarrer R</button>
   <button type="button" class="ghost" id="rc-theme">Thème : auto</button>
@@ -61,6 +55,56 @@
       <button type="submit" id="rc-send" aria-label="Exécuter">▶</button>
     </form>
   </section>
+  <section class="rc-pane" id="pane-hist" aria-labelledby="tab-hist">
+    <div class="pk">
+      <div class="pk-search">
+        <input type="search" id="hi-q" placeholder="Chercher dans l’historique" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Chercher dans l’historique">
+      </div>
+      <div class="hi-actions">
+        <button type="button" class="ghost" id="hi-export">Enregistrer (.R)</button>
+        <button type="button" class="ghost" id="hi-clear">Tout effacer</button>
+      </div>
+      <p class="pk-hint" id="hi-count"></p>
+      <div id="hi-list" class="hi-list"></div>
+    </div>
+  </section>
+  <section class="rc-pane" id="pane-files" aria-labelledby="tab-files">
+    <div class="pk">
+      <div>
+        <h2>Mes scripts</h2>
+        <div class="pk-search fi-save">
+          <input type="text" id="fi-name" placeholder="Nom du script (ex. TP1 régression)" aria-label="Nom du script">
+          <button type="button" id="fi-save">Enregistrer</button>
+        </div>
+        <p class="pk-hint">Les scripts sont gardés dans l’application, même sans connexion. Touchez « Ouvrir » pour les reprendre.</p>
+        <div id="fi-scripts" class="fi-list"></div>
+        <button type="button" class="ghost fi-new" id="fi-new">+ Nouveau script vide</button>
+      </div>
+      <div>
+        <h2>Mes notes</h2>
+        <textarea id="fi-notes" class="fi-notes" placeholder="Notez ici vos remarques, résultats, interprétations…" aria-label="Mes notes"></textarea>
+      </div>
+      <div>
+        <h2>Enregistrer sur le téléphone</h2>
+        <div class="fi-grid">
+          <button type="button" class="ghost" data-export="script">Script actuel <small>.R</small></button>
+          <button type="button" class="ghost" data-export="notes">Mes notes <small>.txt</small></button>
+          <button type="button" class="ghost" data-export="console">Console (texte) <small>.txt</small></button>
+          <button type="button" class="ghost" data-export="report">Rapport avec graphiques <small>.html</small></button>
+          <button type="button" class="ghost" data-export="history">Historique <small>.R</small></button>
+          <button type="button" class="ghost" data-export="all">Tout (scripts + notes) <small>.json</small></button>
+        </div>
+        <label class="btn ghost rc-file fi-restore">Restaurer une sauvegarde (.json)<input id="fi-import" type="file" accept=".json,application/json" hidden></label>
+      </div>
+      <div>
+        <h2>Fichiers créés par R</h2>
+        <p class="pk-hint">Ex. <code>write.csv(df, "resultats.csv")</code>, <code>saveRDS(fit, "modele.rds")</code>, ou <code>png("graph.png"); plot(x); dev.off()</code>.
+          Raccourci : <code>enregistrer("resultats.csv")</code> l’envoie directement sur le téléphone.</p>
+        <div id="fi-rfiles" class="fi-list"></div>
+        <button type="button" class="ghost fi-new" id="fi-refresh">Actualiser</button>
+      </div>
+    </div>
+  </section>
   <section class="rc-pane" id="pane-pkgs" aria-labelledby="tab-pkgs">
     <div class="pk" id="pk">
       <div class="pk-search">
@@ -76,6 +120,13 @@
   </section>
 </main>
 <div class="rc-keys" id="rc-keys" aria-label="Touches R"></div>
+<nav class="rc-nav" role="tablist" aria-label="Vue">
+  <button type="button" role="tab" id="tab-script" data-view="script" aria-controls="pane-script"><svg viewBox="0 0 24 24"><path d="M5 3h10l4 4v14H5z M14 3v5h5 M8 12h8 M8 16h6"/></svg>Script</button>
+  <button type="button" role="tab" id="tab-console" data-view="console" aria-controls="pane-console"><svg viewBox="0 0 24 24"><path d="M3 5h18v14H3z M7 10l3 2-3 2 M12 15h5"/></svg>Console</button>
+  <button type="button" role="tab" id="tab-hist" data-view="hist" aria-controls="pane-hist"><svg viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6 M3 3v4h4 M12 7v5l3 2"/></svg>Historique</button>
+  <button type="button" role="tab" id="tab-files" data-view="files" aria-controls="pane-files"><svg viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3z"/></svg>Fichiers</button>
+  <button type="button" role="tab" id="tab-pkgs" data-view="pkgs" aria-controls="pane-pkgs"><svg viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z M4 7.5l8 4.5 8-4.5 M12 12v9"/></svg>Paquets</button>
+</nav>
 <script src="js/app.js" type="module"></script>
 </body>
 </html>

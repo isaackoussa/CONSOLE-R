@@ -90,7 +90,6 @@ body.rc {
 .rc-title small.ok { color: var(--good); }
 .rc-title small.busy { color: var(--warn); }
 .rc-title small.bad { color: var(--bad); }
-.rc-tabs button { padding: 7px 10px; font-size: 13.5px; }
 .rc-menu-btn { font-size: 20px; line-height: 1; padding: 6px 12px; flex: none; }
 
 .rc-menu {
@@ -112,7 +111,8 @@ body.rc {
 .rc-main { flex: 1; min-height: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
 .rc-pane { min-height: 0; min-width: 0; display: flex; flex-direction: column; }
 .rc-main > .rc-pane { display: none; }
-.rc-main[data-view="script"] #pane-script, .rc-main[data-view="console"] #pane-console, .rc-main[data-view="pkgs"] #pane-pkgs { display: flex; }
+.rc-main[data-view="script"] #pane-script, .rc-main[data-view="console"] #pane-console, .rc-main[data-view="pkgs"] #pane-pkgs,
+.rc-main[data-view="hist"] #pane-hist, .rc-main[data-view="files"] #pane-files { display: flex; }
 
 .rc-editor {
   flex: 1; min-height: 0; resize: none; margin: 0; border: 0; border-radius: 0; padding: 12px 14px;
@@ -153,7 +153,7 @@ body.rc {
 .rc-prompt button { padding: 7px 14px; font-size: 16px; }
 
 .rc-keys {
-  flex: none; display: flex; gap: 5px; overflow-x: auto; padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
+  flex: none; display: flex; gap: 5px; overflow-x: auto; padding: 6px 8px;
   border-top: 1px solid var(--line); background: var(--panel-2); scrollbar-width: none;
 }
 .rc-keys::-webkit-scrollbar { display: none; }
@@ -194,3 +194,54 @@ body.rc {
 .pk-opt { display: flex; gap: 8px; align-items: center; font-size: 14px; }
 .pk-opt input { accent-color: var(--accent); width: 18px; height: 18px; }
 .rc-keys[hidden] { display: none; }
+
+/* ------------------------------------------------ Barre d'onglets en bas */
+.rc-title em { font-style: normal; font-weight: 500; font-size: 13px; color: var(--ink-3); }
+.rc-nav {
+  flex: none; display: grid; grid-template-columns: repeat(5, 1fr); border-top: 1px solid var(--line); background: var(--panel);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.rc-nav button {
+  display: grid; justify-items: center; gap: 2px; padding: 7px 2px 6px; border: 0; border-radius: 0; background: transparent;
+  color: var(--ink-3); font-size: 11.5px; font-weight: 500; touch-action: manipulation;
+}
+.rc-nav svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.rc-nav button[aria-selected="true"] { color: var(--accent); }
+.rc-nav button[aria-selected="true"] svg { stroke-width: 2.2; }
+
+/* ------------------------------------------------ Historique */
+.hi-actions { display: flex; gap: 8px; }
+.hi-actions button { flex: 1; }
+.hi-list { display: grid; gap: 10px; }
+.hi-day { font-family: var(--f-display); font-weight: 600; font-size: 14px; color: var(--ink-2); margin-top: 6px; }
+.hi-item { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 8px 10px; display: grid; gap: 6px; min-width: 0; }
+.hi-meta { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--ink-3); }
+.hi-src { font-family: var(--f-mono); text-transform: uppercase; letter-spacing: 0.05em; font-size: 10.5px; }
+.hi-item pre {
+  margin: 0; font-family: var(--f-mono); font-size: 13px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere;
+  max-height: 8.6em; overflow: hidden; color: var(--ink);
+}
+.hi-item.open pre { max-height: none; }
+.hi-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.hi-btns button { font-size: 12.5px; padding: 4px 10px; }
+
+/* ------------------------------------------------ Fichiers */
+.fi-list { display: grid; gap: 8px; }
+.fi-row {
+  display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 8px 10px;
+}
+.fi-row.current { border-color: var(--accent); }
+.fi-row .fi-main { flex: 1; min-width: 0; display: grid; }
+.fi-row b { font-weight: 600; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fi-row small { color: var(--ink-3); font-size: 12px; }
+.fi-row button { font-size: 12.5px; padding: 4px 9px; flex: none; }
+.fi-notes { min-height: 160px; font-family: var(--f-body); font-size: 16px; line-height: 1.5; resize: vertical; width: 100%; }
+.fi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr)); gap: 8px; }
+.fi-grid button { text-align: left; display: grid; gap: 1px; }
+.fi-grid small { font-family: var(--f-mono); color: var(--ink-3); font-weight: 400; font-size: 11.5px; }
+.fi-new, .fi-restore { margin-top: 8px; width: 100%; text-align: center; }
+.rc-toast {
+  position: fixed; left: 50%; bottom: calc(80px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 80;
+  background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 14px; max-width: calc(100vw - 32px);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.25);
+}

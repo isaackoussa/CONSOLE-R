@@ -65,6 +65,12 @@ local({
     if (length(still)) message("Paquet indisponible pour webR : ", paste(still, collapse = ", "))
     invisible()
   }
+  # enregistrer("resultats.csv") : envoie un fichier du répertoire de travail sur le téléphone
+  e$enregistrer <- function(fichier) {
+    if (!file.exists(fichier)) stop("fichier introuvable : ", fichier, call. = FALSE)
+    cat("\004", normalizePath(fichier), "\n", sep = "")
+    invisible(fichier)
+  }
   attach(e, name = "tools:console")
 })
 try(webr::shim_install(), silent = TRUE)
@@ -152,19 +158,19 @@ const main = $('.rc-main'), out = $('#rc-out'), editor = $('#rc-editor'), input 
 const statusEl = $('#rc-status');
 function status(text, cls) { statusEl.textContent = text; statusEl.className = cls || ''; }
 
+const VIEWS = ['script', 'console', 'hist', 'files', 'pkgs'];
 function setView(v) {
+  if (!VIEWS.includes(v)) v = 'console';
   main.dataset.view = v;
-  $('#tab-script').setAttribute('aria-pressed', String(v === 'script'));
-  $('#tab-console').setAttribute('aria-pressed', String(v === 'console'));
-  $('#tab-pkgs').setAttribute('aria-pressed', String(v === 'pkgs'));
-  $('#rc-keys').hidden = v === 'pkgs';
+  document.querySelectorAll('.rc-nav button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.view === v)));
+  $('#rc-keys').hidden = v !== 'script' && v !== 'console';
   if (v === 'pkgs') refreshPkgs();
+  if (v === 'hist') renderHistory();
+  if (v === 'files') { renderScripts(); refreshRFiles(); }
   store.set('view', v);
   if (v === 'console') scrollEnd();
 }
-$('#tab-script').addEventListener('click', () => setView('script'));
-$('#tab-console').addEventListener('click', () => setView('console'));
-$('#tab-pkgs').addEventListener('click', () => setView('pkgs'));
+document.querySelectorAll('.rc-nav button').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
 const wide = matchMedia('(min-width: 900px)');
 
 // ------------------------------------------------------------------ sortie
@@ -173,12 +179,14 @@ function newCell() { const c = document.createElement('div'); c.className = 'rc-
 function info(html, cell = newCell()) {
   const p = document.createElement('pre'); p.className = 'rc-info'; p.innerHTML = html; cell.appendChild(p); scrollEnd(); return cell;
 }
+const toSave = [];
 function renderOutput(cell, output) {
   let pre = null, cls = null;
   for (const o of output) {
     if (o.type !== 'stdout' && o.type !== 'stderr') continue;
     for (let line of String(o.data).split('\n')) {
       let c = o.type === 'stdout' ? '' : 'rc-msg';
+      if (line[0] === '\u0004') { toSave.push(line.slice(1)); continue; }
       if (line[0] === '\u0001') { c = 'rc-echo'; line = line.slice(1); }
       else if (line[0] === '\u0002') { c = 'rc-err'; line = line.slice(1); }
       else if (line[0] === '\u0003') { c = 'rc-warn'; line = line.slice(1); }
@@ -283,6 +291,7 @@ function runCode(code, { echo = true, partial = false } = {}) {
       if (st === 'incomplete') { if (!c.childNodes.length) c.remove(); return st; }
       renderOutput(c, r.output);
       for (const img of r.images || []) addPlot(c, img);
+      for (const f of toSave.splice(0)) await saveRFile(f);
       if (!c.childNodes.length) c.remove();
       return st;
     } catch (e) {
@@ -309,12 +318,16 @@ abline(fit, col = "tomato", lwd = 2)
 `;
 editor.value = store.get('script', DEFAULT_SCRIPT);
 let saveT = 0;
-editor.addEventListener('input', () => { clearTimeout(saveT); saveT = setTimeout(() => store.set('script', editor.value), 400); });
+editor.addEventListener('input', () => {
+  clearTimeout(saveT);
+  saveT = setTimeout(() => { store.set('script', editor.value); if (typeof autosaveCurrent === 'function') autosaveCurrent(); }, 400);
+});
 
 function runAll() {
   const code = editor.value;
   if (!code.trim()) return;
   if (!wide.matches) setView('console');
+  record(code, 'script');
   runCode(code);
 }
 function runSelection() {
@@ -331,6 +344,7 @@ function runSelection() {
   }
   if (!code.trim()) return;
   if (!wide.matches) setView('console');
+  record(code, 'script');
   runCode(code);
 }
 $('#rc-run-all').addEventListener('click', runAll);
@@ -342,8 +356,20 @@ editor.addEventListener('keydown', (e) => {
 
 // ------------------------------------------------------------------ console interactive
 let pending = '';
-const history = store.get('history', []);
+// Historique : chaque code exécuté (console, script, relance) est gardé avec sa date, 1000 entrées au plus
+const journal = store.get('journal', null) || store.get('history', []).map((c) => ({ c, t: 0, s: 'console' }));
+const history = journal.map((j) => j.c); // pour ↑/↓ dans la console
 let hIdx = history.length;
+function record(code, src) {
+  code = code.replace(/\s+$/, '');
+  if (!code.trim()) return;
+  const last = journal[journal.length - 1];
+  if (last && last.c === code) { last.t = Date.now(); last.s = src; }
+  else { journal.push({ c: code, t: Date.now(), s: src }); history.push(code); }
+  if (journal.length > 1000) { journal.splice(0, journal.length - 1000); history.splice(0, history.length - 1000); }
+  hIdx = history.length;
+  store.set('journal', journal);
+}
 const ps = $('#rc-ps');
 function autoGrow() { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight + 2, innerHeight * 0.3)}px`; }
 input.addEventListener('input', autoGrow);
@@ -352,10 +378,6 @@ async function submit() {
   const line = input.value;
   if (!line.trim() && !pending) return;
   input.value = ''; autoGrow();
-  if (line.trim()) {
-    history.push(line); if (history.length > 200) history.splice(0, history.length - 200);
-    store.set('history', history);
-  }
   hIdx = history.length;
   const code = pending ? `${pending}\n${line}` : line;
   const st = await runCode(code, { partial: true });
@@ -365,6 +387,7 @@ async function submit() {
     p.textContent = code.split('\n').map((l, i) => (i ? '+ ' : '> ') + l).join('\n'); c.appendChild(p); c.dataset.pending = '1'; scrollEnd();
   } else {
     pending = ''; ps.textContent = '>';
+    record(code, 'console');
   }
   // l'écho provisoire d'une saisie incomplète est remplacé par celui de l'exécution
   if (st !== 'incomplete') out.querySelectorAll('.rc-cell[data-pending]').forEach((c) => c.remove());
@@ -450,14 +473,8 @@ $('#rc-open-script').addEventListener('change', async (e) => {
   const f = e.target.files[0]; e.target.value = '';
   if (!f) return;
   editor.value = await f.text(); store.set('script', editor.value);
+  setCurrent(f.name.replace(/\.(r|txt)$/i, ''));
   setMenu(false); setView('script');
-});
-$('#rc-download-script').addEventListener('click', () => {
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([editor.value], { type: 'text/plain' }));
-  a.download = 'script.R'; document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  setMenu(false);
 });
 $('#rc-clear').addEventListener('click', () => { out.innerHTML = ''; setMenu(false); setView('console'); });
 $('#rc-restart').addEventListener('click', async () => {
@@ -471,6 +488,216 @@ $('#rc-restart').addEventListener('click', async () => {
 
 let resizeT = 0;
 addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { if (webR) enqueue(syncWidth).catch(() => {}); }, 300); });
+
+// ------------------------------------------------------------------ enregistrement sur le téléphone
+function toast(msg) {
+  const t = document.createElement('div'); t.className = 'rc-toast'; t.textContent = msg; t.setAttribute('role', 'status');
+  document.body.appendChild(t); setTimeout(() => t.remove(), 2600);
+}
+const stamp = () => { const d = new Date(), p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}h${p(d.getMinutes())}`; };
+const safeName = (n) => (n || 'sans-titre').trim().replace(/[\\/:*?"<>|]+/g, '-').slice(0, 80) || 'sans-titre';
+// Sur téléphone : feuille de partage (Fichiers, Notes, Drive, WhatsApp…) si possible, sinon téléchargement
+async function saveFile(name, data, type, { share = true } = {}) {
+  const blob = data instanceof Blob ? data : new Blob([data], { type });
+  const touch = matchMedia('(pointer: coarse)').matches;
+  if (share && touch && navigator.canShare) {
+    try {
+      const file = new File([blob], name, { type: blob.type || type });
+      if (navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: name }); return; }
+    } catch (e) { if (e && e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  toast(`Enregistré : ${name} (dossier Téléchargements)`);
+}
+async function saveRFile(path) {
+  try {
+    const data = await webR.FS.readFile(path);
+    await saveFile(path.split('/').pop(), new Blob([data]), 'application/octet-stream', { share: false });
+  } catch (e) { toast(`Impossible d’enregistrer ${path}`); }
+}
+
+// ------------------------------------------------------------------ historique
+const fmtTime = (t) => (t ? new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '');
+function dayLabel(t) {
+  if (!t) return 'Plus ancien';
+  const d = new Date(t), today = new Date(); today.setHours(0, 0, 0, 0);
+  const diff = Math.round((today - new Date(d).setHours(0, 0, 0, 0)) / 864e5);
+  return diff === 0 ? 'Aujourd’hui' : diff === 1 ? 'Hier' : d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+}
+const SRC = { console: 'console', script: 'script', relance: 'relancé' };
+function renderHistory() {
+  const q = $('#hi-q').value.trim().toLowerCase();
+  const list = $('#hi-list');
+  const items = journal.map((j, i) => ({ ...j, i })).filter((j) => !q || j.c.toLowerCase().includes(q)).reverse();
+  $('#hi-count').textContent = journal.length
+    ? `${items.length} entrée${items.length > 1 ? 's' : ''}${q ? ' trouvée' + (items.length > 1 ? 's' : '') : ''} · touchez un code pour le voir en entier`
+    : 'Aucun code exécuté pour l’instant. Tout ce que vous lancez (console ou script) apparaîtra ici.';
+  list.replaceChildren();
+  let day = null;
+  for (const j of items.slice(0, 300)) {
+    const dl = dayLabel(j.t);
+    if (dl !== day) { day = dl; const h = document.createElement('div'); h.className = 'hi-day'; h.textContent = dl; list.appendChild(h); }
+    const it = document.createElement('div'); it.className = 'hi-item'; it.dataset.i = j.i;
+    it.innerHTML = `<div class="hi-meta"><span class="hi-src">${SRC[j.s] || j.s}</span><span>${fmtTime(j.t)}</span></div>
+      <pre></pre><div class="hi-btns"><button type="button" data-a="run">▶ Relancer</button><button type="button" class="ghost" data-a="console">Console</button>
+      <button type="button" class="ghost" data-a="script">+ Script</button><button type="button" class="ghost" data-a="copy">Copier</button>
+      <button type="button" class="ghost" data-a="del" aria-label="Supprimer">✕</button></div>`;
+    it.querySelector('pre').textContent = j.c;
+    list.appendChild(it);
+  }
+  if (items.length > 300) list.insertAdjacentHTML('beforeend', `<p class="pk-hint">… ${items.length - 300} entrées plus anciennes : affinez la recherche.</p>`);
+}
+$('#hi-q').addEventListener('input', renderHistory);
+$('#hi-list').addEventListener('click', async (e) => {
+  const it = e.target.closest('.hi-item'); if (!it) return;
+  const j = journal[+it.dataset.i]; if (!j) return;
+  const a = e.target.closest('button')?.dataset.a;
+  if (!a) { it.classList.toggle('open'); return; }
+  if (a === 'run') { setView('console'); record(j.c, 'relance'); runCode(j.c); }
+  else if (a === 'console') { input.value = j.c; autoGrow(); setView('console'); input.focus(); }
+  else if (a === 'script') {
+    editor.value = editor.value.replace(/\n*$/, '\n\n') + j.c + '\n'; editor.dispatchEvent(new Event('input'));
+    setView('script'); toast('Ajouté à la fin du script');
+  } else if (a === 'copy') {
+    try { await navigator.clipboard.writeText(j.c); toast('Copié'); } catch (err) { toast('Copie impossible'); }
+  } else if (a === 'del') {
+    journal.splice(+it.dataset.i, 1); history.splice(0, history.length, ...journal.map((x) => x.c)); hIdx = history.length;
+    store.set('journal', journal); renderHistory();
+  }
+});
+function historyAsR() {
+  return `# Historique Console R — exporté le ${new Date().toLocaleString('fr-FR')}\n\n` +
+    journal.map((j) => `# ${j.t ? new Date(j.t).toLocaleString('fr-FR') : ''} (${SRC[j.s] || j.s})\n${j.c}\n`).join('\n');
+}
+$('#hi-export').addEventListener('click', () => saveFile(`historique_${stamp()}.R`, historyAsR(), 'text/plain'));
+$('#hi-clear').addEventListener('click', () => {
+  if (!journal.length || !confirm('Effacer tout l’historique ?')) return;
+  journal.length = 0; history.length = 0; hIdx = 0; store.set('journal', journal); renderHistory();
+});
+
+// ------------------------------------------------------------------ mes scripts, notes, exports
+const scripts = store.get('scripts', {}); // { nom: { code, t } }
+let current = store.get('current', '');
+function setCurrent(name) {
+  current = name || ''; store.set('current', current);
+  $('#rc-script-name').textContent = current ? `· ${current}` : '';
+  $('#fi-name').value = current;
+}
+function autosaveCurrent() {
+  if (current && scripts[current]) { scripts[current] = { code: editor.value, t: Date.now() }; store.set('scripts', scripts); }
+}
+function renderScripts() {
+  const box = $('#fi-scripts');
+  const names = Object.keys(scripts).sort((a, b) => scripts[b].t - scripts[a].t);
+  box.replaceChildren(...names.map((n) => {
+    const r = document.createElement('div'); r.className = 'fi-row' + (n === current ? ' current' : ''); r.dataset.n = n;
+    const lines = scripts[n].code.split('\n').length;
+    r.innerHTML = `<div class="fi-main"><b></b><small>${n === current ? 'ouvert · ' : ''}${lines} ligne${lines > 1 ? 's' : ''} · ${new Date(scripts[n].t).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}</small></div>
+      <button type="button" data-a="open">Ouvrir</button><button type="button" class="ghost" data-a="dl" aria-label="Enregistrer sur le téléphone">⤓</button>
+      <button type="button" class="ghost" data-a="del" aria-label="Supprimer">✕</button>`;
+    r.querySelector('b').textContent = n;
+    return r;
+  }));
+  if (!names.length) box.innerHTML = '<p class="pk-hint">Aucun script enregistré. Donnez un nom ci-dessus puis « Enregistrer ».</p>';
+}
+$('#fi-save').addEventListener('click', () => {
+  const n = safeName($('#fi-name').value);
+  if (!$('#fi-name').value.trim()) { $('#fi-name').focus(); return; }
+  if (scripts[n] && n !== current && !confirm(`Remplacer le script « ${n} » ?`)) return;
+  scripts[n] = { code: editor.value, t: Date.now() }; store.set('scripts', scripts);
+  setCurrent(n); renderScripts(); toast(`Script « ${n} » enregistré`);
+});
+$('#fi-new').addEventListener('click', () => {
+  editor.value = ''; store.set('script', ''); setCurrent(''); renderScripts(); setView('script'); editor.focus();
+});
+$('#fi-scripts').addEventListener('click', (e) => {
+  const r = e.target.closest('.fi-row'); const a = e.target.closest('button')?.dataset.a; if (!r || !a) return;
+  const n = r.dataset.n;
+  if (a === 'open') { editor.value = scripts[n].code; store.set('script', editor.value); setCurrent(n); setView('script'); }
+  else if (a === 'dl') saveFile(`${n}.R`, scripts[n].code, 'text/plain');
+  else if (a === 'del' && confirm(`Supprimer le script « ${n} » ?`)) {
+    delete scripts[n]; store.set('scripts', scripts); if (n === current) setCurrent(''); renderScripts();
+  }
+});
+
+const notes = $('#fi-notes');
+notes.value = store.get('notes', '');
+let notesT = 0;
+notes.addEventListener('input', () => { clearTimeout(notesT); notesT = setTimeout(() => store.set('notes', notes.value), 300); });
+
+function reportHTML() {
+  const body = out.cloneNode(true);
+  body.querySelectorAll('[data-pending]').forEach((n) => n.remove());
+  const noteHtml = notes.value.trim() ? `<h2>Notes</h2><div class="notes">${esc(notes.value)}</div>` : '';
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session R ${new Date().toLocaleString('fr-FR')}</title><style>
+body{font-family:system-ui,sans-serif;max-width:860px;margin:0 auto;padding:16px;color:#141821;background:#fff}
+h1{font-size:20px}h2{font-size:16px;margin-top:24px}pre{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.rc-cell{padding:6px 0 10px;border-bottom:1px dashed #dcdfe6}.rc-echo{color:#2851c8}.rc-err{color:#b83232}.rc-warn{color:#9a6400}.rc-msg{color:#454c5b}
+.rc-info{color:#6f7686;font-family:system-ui,sans-serif}img{max-width:100%;height:auto;border:1px solid #dcdfe6;border-radius:4px;margin:6px 0}
+.notes{white-space:pre-wrap;background:#f5f6f8;padding:10px;border-radius:6px}</style></head><body>
+<h1>Session R — ${esc(new Date().toLocaleString('fr-FR'))}</h1>${noteHtml}<h2>Console</h2>${body.innerHTML}</body></html>`;
+}
+const EXPORTS = {
+  script: () => saveFile(`${safeName(current || 'script')}.R`, editor.value, 'text/plain'),
+  notes: () => saveFile(`notes_${stamp()}.txt`, notes.value, 'text/plain'),
+  console: () => saveFile(`console_${stamp()}.txt`, out.innerText, 'text/plain'),
+  report: () => saveFile(`rapport_${stamp()}.html`, reportHTML(), 'text/html'),
+  history: () => saveFile(`historique_${stamp()}.R`, historyAsR(), 'text/plain'),
+  all: () => saveFile(`console-r_sauvegarde_${stamp()}.json`, JSON.stringify({ app: 'console-r', v: 1, t: Date.now(), script: editor.value, scripts, notes: notes.value, journal }, null, 1), 'application/json'),
+};
+document.querySelectorAll('[data-export]').forEach((b) => b.addEventListener('click', () => EXPORTS[b.dataset.export]()));
+$('#fi-import').addEventListener('change', async (e) => {
+  const f = e.target.files[0]; e.target.value = '';
+  if (!f) return;
+  try {
+    const d = JSON.parse(await f.text());
+    if (d.app !== 'console-r') throw new Error('format');
+    Object.assign(scripts, d.scripts || {}); store.set('scripts', scripts);
+    if (d.notes && d.notes !== notes.value) { notes.value = notes.value ? `${notes.value}\n\n${d.notes}` : d.notes; store.set('notes', notes.value); }
+    const seen = new Set(journal.map((j) => `${j.t}|${j.c}`));
+    for (const j of d.journal || []) if (!seen.has(`${j.t}|${j.c}`)) journal.push(j);
+    journal.sort((a, b) => a.t - b.t); history.splice(0, history.length, ...journal.map((j) => j.c)); hIdx = history.length;
+    store.set('journal', journal);
+    renderScripts(); toast('Sauvegarde restaurée');
+  } catch (err) { toast('Fichier de sauvegarde invalide'); }
+});
+
+// Fichiers du répertoire de travail de R (write.csv, saveRDS, png…)
+async function refreshRFiles() {
+  const box = $('#fi-rfiles');
+  if (!webR) { box.innerHTML = '<p class="pk-hint">R démarre…</p>'; return; }
+  try {
+    const rows = await enqueue(async () => {
+      const sh = await new webR.Shelter();
+      try {
+        const r = await sh.evalR('f <- list.files(recursive = TRUE); f <- f[!startsWith(f, ".") & f != "default.profraw"]; i <- file.info(f); keep <- i$size > 0 | f != "Rplots.pdf"; f <- f[keep]; i <- i[keep, ]; data.frame(f = f, s = i$size, t = as.numeric(i$mtime))');
+        const j = await r.toJs();
+        const col = (n) => j.values[j.names.indexOf(n)].values;
+        const f = col('f'), sz = col('s'), t = col('t');
+        return f.map((x, k) => ({ f: x, s: sz[k], t: t[k] })).sort((a, b) => b.t - a.t);
+      } finally { sh.purge(); }
+    });
+    box.replaceChildren(...rows.map((r) => {
+      const d = document.createElement('div'); d.className = 'fi-row'; d.dataset.f = r.f;
+      const kb = r.s < 1024 ? `${r.s} o` : r.s < 1048576 ? `${(r.s / 1024).toFixed(1)} Ko` : `${(r.s / 1048576).toFixed(1)} Mo`;
+      d.innerHTML = '<div class="fi-main"><b></b><small></small></div><button type="button" data-a="dl">Enregistrer</button>';
+      d.querySelector('b').textContent = r.f; d.querySelector('small').textContent = kb;
+      return d;
+    }));
+    if (!rows.length) box.innerHTML = '<p class="pk-hint">Aucun fichier pour l’instant.</p>';
+  } catch (e) { box.innerHTML = '<p class="pk-hint">Liste indisponible.</p>'; }
+}
+$('#fi-refresh').addEventListener('click', refreshRFiles);
+$('#fi-rfiles').addEventListener('click', async (e) => {
+  const d = e.target.closest('.fi-row'); if (!d || !e.target.closest('button')) return;
+  try { const data = await webR.FS.readFile(`${HOME}/${d.dataset.f}`); await saveFile(d.dataset.f.split('/').pop(), new Blob([data]), 'application/octet-stream'); }
+  catch (err) { toast('Lecture du fichier impossible'); }
+});
+setCurrent(current);
 
 // ------------------------------------------------------------------ paquets
 const REPO = 'https://repo.r-wasm.org/';
