@@ -3,7 +3,7 @@
  * Fichiers de l'application : cache d'abord. R (webR) et ses paquets : cache séparé, conservé entre versions.
  * Changer VERSION à chaque publication pour forcer la mise à jour des fichiers de l'application.
  */
-const VERSION = 'console-r-v10';
+const VERSION = 'console-r-v11';
 const RUNTIME = 'console-r-runtime';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css', 'js/app.js', 'js/cloud.js',
@@ -25,9 +25,10 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url);
   if (url.origin === location.origin && (url.pathname.includes('/api/') || url.pathname.endsWith('/admin.html'))) return; // compte et admin : toujours le réseau
   if (url.origin !== location.origin) {
-    // Les fichiers d'une version donnée de webR et des paquets ne changent pas : cache d'abord.
-    // L'index du dépôt (PACKAGES) et le reste (polices) : réseau d'abord, cache en secours.
-    const stable = (url.hostname.endsWith('r-wasm.org') || url.hostname.endsWith('r-universe.dev')) && !url.pathname.includes('/latest/') && !/PACKAGES(\.\w+)?$/.test(url.pathname);
+    // Seuls les fichiers d'une version figée de webR (/v0.6.0/…) ne changent jamais : cache d'abord.
+    // webR « latest », paquets, index des dépôts, polices : réseau d'abord (un paquet peut être recompilé
+    // sous le même nom pour une nouvelle version de webR), cache en secours hors ligne.
+    const stable = url.hostname === 'webr.r-wasm.org' && /^\/v\d/.test(url.pathname);
     const net = () => fetch(req).then((res) => {
       if (res.status === 200 || res.type === 'opaque') { const copy = res.clone(); caches.open(RUNTIME).then((c) => c.put(req, copy)); }
       return res;

@@ -33,6 +33,8 @@ R complet dans le navigateur, pensé pour le téléphone. R 4 est compilé en We
   [R-universe](https://cran.r-universe.dev) (presque tout CRAN) — et catalogue par thème : manipulation de données,
   import/export, graphiques, statistique, modèles mixtes et survie, économétrie, séries temporelles, analyse
   multivariée, apprentissage automatique, actuariat et finance, texte, calcul numérique.
+  Le dépôt de webR (compilé pour la version de webR utilisée) est toujours prioritaire ; R-universe ne sert que pour
+  les paquets qui n’y sont pas, afin de ne jamais mélanger des paquets compilés pour des versions différentes.
   Un simple `library(dplyr)` installe le paquet s’il manque ; `install.packages()` fonctionne aussi.
   Option : réinstaller automatiquement ses paquets à chaque démarrage (depuis le cache).
 - **Import** depuis le téléphone (CSV, Excel, RDS, SPSS/Stata/SAS, JSON…) dans le répertoire de travail.

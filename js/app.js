@@ -5,7 +5,9 @@
  */
 import * as cloud from './cloud.js';
 
-const WEBR_URLS = ['https://webr.r-wasm.org/v0.6.0/webr.mjs', 'https://webr.r-wasm.org/latest/webr.mjs'];
+// Dernière version de webR d'abord : les paquets compilés des dépôts suivent la dernière version ; une version
+// figée finirait par charger des paquets incompatibles (erreurs « unable to load shared object »).
+const WEBR_URLS = ['https://webr.r-wasm.org/latest/webr.mjs', 'https://webr.r-wasm.org/v0.6.0/webr.mjs'];
 const HOME = '/home/web_user';
 const BASE_PKGS = new Set(['base', 'stats', 'utils', 'graphics', 'grDevices', 'methods', 'datasets', 'tools', 'grid',
   'parallel', 'splines', 'stats4', 'compiler', 'tcltk', 'webr']);
@@ -50,6 +52,10 @@ local({
           while (length(m <- regmatches(msg, regexec("https?://[^ ']*/api/fetch\\?url=([^ ']+)", msg))[[1]]))
             msg <- sub(m[1], utils::URLdecode(m[2]), msg, fixed = TRUE)
           msg <- sub("\\. See the Javascript console for further information", "", msg)
+          if (grepl("namespace load failed|could not be loaded|unable to load shared object|dyn.load", msg))
+            msg <- paste0(msg, "\n  → Ce paquet (ou une de ses dépendances) n'a pas pu se charger dans le navigateur.",
+              " Touchez ⋯ → « Redémarrer R » puis relancez : les paquets seront réinstallés depuis le bon dépôt.",
+              " Si l'erreur revient, ce paquet n'est pas compatible webR : cherchez un équivalent dans l'onglet Paquets.")
           if (grepl("cannot open|URL|connection", msg, ignore.case = TRUE) && grepl("https?://", paste(deparse(exprs[[i]]), collapse = "")))
             msg <- paste0(msg, "\n  → Lecture depuis internet impossible : vérifiez l'adresse (lien direct vers le fichier CSV/TXT, pas la page web) et la connexion.")
           emit("\002", paste0("Erreur", where, " : ", msg))
@@ -71,8 +77,14 @@ local({
     if (!length(miss)) return(invisible())
     message("Installation de ", paste(miss, collapse = ", "), " (une fois par session)…")
     ver <- sub("\\.[^.]+$", "", as.character(getRversion()))
-    contrib <- sprintf("%s/bin/emscripten/contrib/%s", sub("/$", "", getOption("webr_pkg_repos")), ver)
-    info <- suppressWarnings(tryCatch(utils::available.packages(contriburl = contrib), error = function(e) NULL))
+    # Dépôt de webR d'abord (compilé pour cette version exacte de webR) ; R-universe seulement pour ce qui y manque.
+    # Mélanger les versions (ex. Matrix de R-universe avec survival de webR) casse le chargement des paquets.
+    info <- NULL
+    for (repo in sub("/$", "", getOption("webr_pkg_repos"))) {
+      x <- suppressWarnings(tryCatch(utils::available.packages(contriburl = sprintf("%s/bin/emscripten/contrib/%s", repo, ver)), error = function(e) NULL))
+      if (is.null(x) || !nrow(x)) next
+      info <- if (is.null(info)) x else rbind(info, x[!rownames(x) %in% rownames(info), , drop = FALSE])
+    }
     if (is.null(info) || !nrow(info)) {
       message("Impossible de joindre les dépôts de paquets : vérifiez la connexion internet.")
       return(invisible())
