@@ -8,7 +8,8 @@ R complet dans le navigateur, pensé pour le téléphone. R 4 est compilé en We
 - **Script** : éditeur, « Tout exécuter », « Ligne / sélection » (Ctrl+Entrée), ouverture et enregistrement de fichiers `.R`.
 - **Console** : invite `>`, saisie sur plusieurs lignes (`+`), historique ↑/↓, erreurs et avis affichés comme dans R.
 - **Graphiques** affichés dans la console (base R, ggplot2, lattice…) ; appui long pour enregistrer l’image.
-- **Paquets** : recherche dans tout le dépôt webR (plusieurs milliers de paquets CRAN) et catalogue par thème :
+- **Paquets** : recherche dans deux dépôts de paquets compilés pour le navigateur — celui de webR et
+  [R-universe](https://cran.r-universe.dev) (presque tout CRAN) — et catalogue par thème :
   manipulation de données, import/export, graphiques, statistique, modèles mixtes et survie, économétrie,
   séries temporelles, analyse multivariée, apprentissage automatique, actuariat et finance, texte, calcul numérique.
   Un simple `library(dplyr)` installe le paquet s’il manque ; `install.packages()` fonctionne aussi.

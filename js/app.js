@@ -60,9 +60,21 @@ local({
     miss <- unique(pkgs[!vapply(pkgs, installed, logical(1))])
     if (!length(miss)) return(invisible())
     message("Installation de ", paste(miss, collapse = ", "), " (une fois par session)…")
-    suppressWarnings(try(webr::install(miss), silent = TRUE))
-    still <- miss[!vapply(miss, installed, logical(1))]
-    if (length(still)) message("Paquet indisponible pour webR : ", paste(still, collapse = ", "))
+    ver <- sub("\\.[^.]+$", "", as.character(getRversion()))
+    contrib <- sprintf("%s/bin/emscripten/contrib/%s", sub("/$", "", getOption("webr_pkg_repos")), ver)
+    info <- suppressWarnings(tryCatch(utils::available.packages(contriburl = contrib), error = function(e) NULL))
+    if (is.null(info) || !nrow(info)) {
+      message("Impossible de joindre les dépôts de paquets : vérifiez la connexion internet.")
+      return(invisible())
+    }
+    absent <- setdiff(miss, rownames(info))
+    if (length(absent)) message("Paquet introuvable dans les dépôts : ", paste(absent, collapse = ", "),
+      " (vérifiez l'orthographe et les majuscules, ou il n'existe pas en version WebAssembly)")
+    todo <- intersect(miss, rownames(info))
+    if (length(todo)) suppressWarnings(try(webr::install(todo, info = info), silent = TRUE))
+    still <- todo[!vapply(todo, installed, logical(1))]
+    if (length(still)) message("Installation impossible : ", paste(still, collapse = ", "),
+      " (une de ses dépendances n'existe pas en version WebAssembly ; cherchez un paquet équivalent dans l'onglet Paquets)")
     invisible()
   }
   # enregistrer("resultats.csv") : envoie un fichier du répertoire de travail sur le téléphone
@@ -73,7 +85,11 @@ local({
   }
   attach(e, name = "tools:console")
 })
-try(webr::shim_install(), silent = TRUE)
+# install.packages() passe par webR ; library() reste celui de R (les paquets manquants sont installés avant l'exécution)
+local({ e <- new.env(); e[["install.packages"]] <- function(pkgs, ...) get("deps", "tools:console")(pkgs); attach(e, name = "webr_shims", warn.conflicts = FALSE) })
+# Deux dépôts de paquets compilés pour webR : celui de webR et R-universe (presque tout CRAN)
+options(webr_pkg_repos = c("https://repo.r-wasm.org", "https://cran.r-universe.dev"),
+        repos = c(CRAN = "https://cran.r-universe.dev"))
 # Aide (?mean, help(lm)) : le texte de la page d'aide s'affiche dans la console
 options(help_type = "text", pager = function(files, header, title, delete.file) {
   for (f in files) cat(gsub("_\b", "", readLines(f, warn = FALSE)), sep = "\n")
@@ -168,7 +184,7 @@ function setView(v) {
   if (v === 'hist') renderHistory();
   if (v === 'files') { renderScripts(); refreshRFiles(); }
   store.set('view', v);
-  if (v === 'console') scrollEnd();
+  if (v === 'console') { scrollEnd(); $('#tab-console').classList.remove('dot'); }
 }
 document.querySelectorAll('.rc-nav button').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
 const wide = matchMedia('(min-width: 900px)');
@@ -300,6 +316,7 @@ function runCode(code, { echo = true, partial = false } = {}) {
     } finally {
       shelter.purge();
       scrollEnd();
+      if (main.dataset.view !== 'console' && !(wide.matches && main.dataset.view === 'script')) $('#tab-console').classList.add('dot');
     }
   }).catch(() => 'error'); // R n'a pas démarré : le message est déjà affiché
 }
@@ -700,7 +717,7 @@ $('#fi-rfiles').addEventListener('click', async (e) => {
 setCurrent(current);
 
 // ------------------------------------------------------------------ paquets
-const REPO = 'https://repo.r-wasm.org/';
+const REPOS = ['https://repo.r-wasm.org/', 'https://cran.r-universe.dev/'];
 const CATALOG = [
   ['Manipulation de données', 'tidyverse et compagnie', ['dplyr', 'tidyr', 'tibble', 'purrr', 'stringr', 'forcats', 'lubridate', 'data.table', 'janitor']],
   ['Import / export', 'CSV, Excel, SPSS, Stata, SAS, JSON', ['readr', 'readxl', 'writexl', 'openxlsx', 'haven', 'jsonlite']],
@@ -771,12 +788,15 @@ async function loadIndex() {
   if (pkgState.index || !webR) return;
   try {
     const ver = String(webR.versionR || '').split('.').slice(0, 2).join('.');
-    const res = await fetch(`${REPO}bin/emscripten/contrib/${ver}/PACKAGES`);
-    if (!res.ok) return;
+    const texts = await Promise.all(REPOS.map((r) => fetch(`${r}bin/emscripten/contrib/${ver}/PACKAGES`)
+      .then((res) => (res.ok ? res.text() : '')).catch(() => '')));
+    if (!texts.some(Boolean)) return;
     const idx = new Map();
-    for (const block of (await res.text()).split(/\n\s*\n/)) {
-      const n = /^Package:\s*(\S+)/m.exec(block), v = /^Version:\s*(\S+)/m.exec(block);
-      if (n) idx.set(n[1], v ? v[1] : '');
+    for (const text of texts) {
+      for (const block of text.split(/\n\s*\n/)) {
+        const n = /^Package:\s*(\S+)/m.exec(block), v = /^Version:\s*(\S+)/m.exec(block);
+        if (n && !idx.has(n[1])) idx.set(n[1], v ? v[1] : '');
+      }
     }
     pkgState.index = idx;
     $('#pk-info').innerHTML = `${idx.size.toLocaleString('fr-FR')} paquets disponibles. Touchez un paquet pour l’installer et le charger (<code>library()</code>).`;

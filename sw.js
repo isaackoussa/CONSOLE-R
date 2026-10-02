@@ -3,7 +3,7 @@
  * Fichiers de l'application : cache d'abord. R (webR) et ses paquets : cache séparé, conservé entre versions.
  * Changer VERSION à chaque publication pour forcer la mise à jour des fichiers de l'application.
  */
-const VERSION = 'console-r-v2';
+const VERSION = 'console-r-v3';
 const RUNTIME = 'console-r-runtime';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css', 'js/app.js',
@@ -26,7 +26,7 @@ self.addEventListener('fetch', (e) => {
   if (url.origin !== location.origin) {
     // Les fichiers d'une version donnée de webR et des paquets ne changent pas : cache d'abord.
     // L'index du dépôt (PACKAGES) et le reste (polices) : réseau d'abord, cache en secours.
-    const stable = url.hostname.endsWith('r-wasm.org') && !url.pathname.includes('/latest/') && !/PACKAGES(\.\w+)?$/.test(url.pathname);
+    const stable = (url.hostname.endsWith('r-wasm.org') || url.hostname.endsWith('r-universe.dev')) && !url.pathname.includes('/latest/') && !/PACKAGES(\.\w+)?$/.test(url.pathname);
     const net = () => fetch(req).then((res) => {
       if (res.status === 200 || res.type === 'opaque') { const copy = res.clone(); caches.open(RUNTIME).then((c) => c.put(req, copy)); }
       return res;
