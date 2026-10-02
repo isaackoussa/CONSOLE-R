@@ -11,10 +11,11 @@ const blobs = new BlobsServer({ directory: DIR, token: "tok", port: 8798 });
 await blobs.start();
 process.env.NETLIFY_BLOBS_CONTEXT = Buffer.from(JSON.stringify({ edgeURL: "http://localhost:8798", uncachedEdgeURL: "http://localhost:8798", token: "tok", siteID: "site" })).toString("base64");
 process.env.MAIL_DRY_RUN = "1";
+process.env.ADMIN_KEY ??= "admin-local"; // clé admin du serveur de test
 process.env.URL = "http://localhost:8767";
 
 const routes: Record<string, (r: Request) => Promise<Response>> = {};
-for (const f of ["auth-send-code", "auth-verify", "progress", "account"]) {
+for (const f of ["auth-send-code", "auth-verify", "progress", "account", "admin"]) {
   const m = await import(`../netlify/functions/${f}.mts`);
   routes[m.config.path] = m.default;
 }

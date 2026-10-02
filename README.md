@@ -53,11 +53,18 @@ Le compte nécessite l’hébergement **Netlify** (fonctions `netlify/functions/
 | `BREVO_API_KEY` | clé API Brevo (la même que pour Éloquence) |
 | `MAIL_FROM` | adresse d’expéditeur validée dans Brevo |
 | `MAIL_FROM_NAME` | nom d’expéditeur (facultatif, « Console R » par défaut) |
+| `ADMIN_KEY` | clé de la console admin (`admin.html`) |
 
 Sur GitHub Pages (sans serveur), l’application fonctionne sans compte et propose à la place une **sauvegarde par
 e-mail** : la progression part en pièce jointe, restaurable avec *Fichiers → Restaurer une sauvegarde*.
 
-Test en local avec les vraies fonctions (e-mails simulés, code affiché dans le terminal) : `npm install` puis `npm run dev`.
+**Console admin** : page séparée `admin.html` (ex. `https://consolerstudio.netlify.app/admin.html`), sans aucun lien
+depuis l’application, non indexée et jamais mise en cache. Protégée par la variable Netlify `ADMIN_KEY` (clé demandée à
+l’ouverture, gardée le temps de l’onglet). On y voit le nombre d’utilisateurs, les actifs et nouveaux sur 7 jours,
+et pour chaque compte : inscription, dernière visite et sauvegarde, connexions, scripts, onglets, historique, paquets ;
+on peut bloquer/débloquer, supprimer un compte (et sa progression) et exporter la liste en CSV.
+
+Test en local avec les vraies fonctions (e-mails simulés, code affiché dans le terminal ; clé admin `admin-local`) : `npm install` puis `npm run dev`.
 
 ## Publier et installer sur le téléphone
 
@@ -80,6 +87,7 @@ python3 -m http.server 8000   # puis ouvrir http://localhost:8000
 
 ```
 index.html            coque de l'application (onglets Script, Console, Historique, Fichiers, Paquets)
+admin.html            console admin, page séparée (non liée à l'application)
 css/app.css           thème clair/sombre, mise en page mobile
 js/app.js             démarrage de webR, exécution, graphiques, onglets de scripts, historique, fichiers, paquets
 sw.js                 service worker (hors ligne, cache de R et des paquets)

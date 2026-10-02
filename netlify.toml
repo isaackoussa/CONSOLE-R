@@ -1,7 +1,7 @@
 [build]
   # le site est statique : on copie seulement les fichiers de l'application (pas node_modules)
   publish = "dist"
-  command = "rm -rf dist && mkdir dist && cp -r index.html manifest.webmanifest sw.js css js icons dist/"
+  command = "rm -rf dist && mkdir dist && cp -r index.html admin.html manifest.webmanifest sw.js css js icons dist/"
 
 [build.environment]
   NODE_VERSION = "22"
@@ -14,3 +14,10 @@
   for = "/sw.js"
   [headers.values]
     Cache-Control = "no-cache"
+
+# Console admin : page séparée, jamais indexée ni mise en cache
+[[headers]]
+  for = "/admin.html"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "no-store"

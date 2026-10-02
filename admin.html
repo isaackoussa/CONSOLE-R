@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Admin · Console R</title>
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #fff; --panel-2: #eef1f5; --ink: #141821; --ink-2: #454c5b; --ink-3: #6f7686; --line: #dcdfe6;
+    --accent: #2851c8; --accent-ink: #fff; --accent-soft: #e5ebfa; --good: #1d7f47; --good-soft: #e3f3ea; --bad: #b83232; --bad-soft: #fbe6e6;
+    --warn: #9a6400; color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e1015; --panel: #161920; --panel-2: #1c2029; --ink: #edf0f5; --ink-2: #b9bfcc; --ink-3: #868d9d; --line: #2a2f3b;
+      --accent: #86a6ff; --accent-ink: #0e1015; --accent-soft: #1d2640; --good: #58c58a; --good-soft: #15291e; --bad: #f07b7b; --bad-soft: #2e1818;
+      --warn: #e2b04a; color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: calc(16px + env(safe-area-inset-top, 0px)) 16px 40px; display: grid; gap: 16px; }
+  header { display: flex; align-items: center; gap: 12px; }
+  header img { border-radius: 10px; }
+  h1 { margin: 0; font-size: 22px; }
+  h1 small { display: block; font-size: 13px; font-weight: 500; color: var(--ink-3); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+  input, button, select { font: inherit; font-size: 16px; border-radius: 8px; }
+  input, select { border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 8px 10px; min-width: 0; }
+  button { border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink); padding: 8px 14px; font-weight: 600; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--accent); }
+  button.danger { border-color: var(--bad); background: transparent; color: var(--bad); }
+  button:disabled { opacity: .55; cursor: progress; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .row input { flex: 1; }
+  #q { flex: 1 1 100%; }
+  .msg { color: var(--ink-3); font-size: 14px; margin: 8px 0 0; }
+  .msg.bad { color: var(--bad); }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+  .stat b { display: block; font-size: 26px; line-height: 1.1; }
+  .stat span { font-size: 13px; color: var(--ink-3); }
+  .users { display: grid; gap: 10px; }
+  .user { display: grid; gap: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+  .user.blocked { border-color: var(--bad); background: var(--bad-soft); }
+  .u-head { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+  .u-mail { font-weight: 700; overflow-wrap: anywhere; }
+  .u-dates { font-size: 13px; color: var(--ink-3); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { font-size: 13px; padding: 2px 9px; border-radius: 999px; background: var(--panel-2); color: var(--ink-2); }
+  .chip.on { background: var(--good-soft); color: var(--good); }
+  .chip.off { background: var(--bad-soft); color: var(--bad); }
+  .u-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .u-actions button { font-size: 14px; padding: 5px 12px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <img src="icons/icon.svg" alt="" width="44" height="44">
+    <h1>Console R — administration <small>Utilisateurs, progression et comptes</small></h1>
+  </header>
+
+  <section class="card" id="login">
+    <form class="row" id="login-form" autocomplete="off">
+      <input type="password" id="key" placeholder="Clé admin (ADMIN_KEY)" aria-label="Clé admin" autocomplete="off">
+      <button type="submit">Ouvrir</button>
+    </form>
+    <p class="msg" id="login-msg">La clé est définie dans Netlify (variable <code>ADMIN_KEY</code> du site). Elle n’est gardée que le temps de l’onglet.</p>
+  </section>
+
+  <section id="panel" hidden>
+    <div class="stats" id="stats"></div>
+    <div class="card row" style="margin-top:12px">
+      <input type="search" id="q" placeholder="Chercher un e-mail" aria-label="Chercher un e-mail">
+      <select id="sort" aria-label="Trier">
+        <option value="lastSeen">Dernière visite</option>
+        <option value="createdAt">Inscription</option>
+        <option value="scripts">Scripts</option>
+        <option value="opens">Connexions</option>
+      </select>
+      <button type="button" class="ghost" id="refresh">Actualiser</button>
+      <button type="button" class="ghost" id="csv">Exporter (CSV)</button>
+      <button type="button" class="ghost" id="logout">Fermer</button>
+    </div>
+    <p class="msg" id="count"></p>
+    <div class="users" id="users"></div>
+  </section>
+</main>
+<script>
+(() => {
+  'use strict';
+  const $ = (s) => document.querySelector(s);
+  const KEY = 'consoler:admin';
+  let key = '';
+  try { key = sessionStorage.getItem(KEY) || ''; } catch (e) { /* ignoré */ }
+  let users = [];
+
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const fmt = (d) => (d ? new Date(d).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) : '—');
+  const ago = (d) => {
+    if (!d) return '—';
+    const m = Math.round((Date.now() - new Date(d)) / 60000);
+    return m < 1 ? 'à l’instant' : m < 60 ? `il y a ${m} min` : m < 1440 ? `il y a ${Math.round(m / 60)} h` : `il y a ${Math.round(m / 1440)} j`;
+  };
+
+  async function api(init = {}) {
+    const res = await fetch('./api/admin', { ...init, headers: { 'x-admin-key': key, 'Content-Type': 'application/json' } });
+    if (!(res.headers.get('content-type') || '').includes('application/json')) throw new Error('Serveur indisponible (ouvrez cette page sur le site Netlify).');
+    const d = await res.json();
+    if (res.status === 401) throw Object.assign(new Error('Clé admin incorrecte.'), { auth: true });
+    if (res.status === 503) throw new Error('ADMIN_KEY n’est pas encore définie dans Netlify.');
+    if (!res.ok) throw new Error(`Erreur ${res.status} (${d.error || ''}).`);
+    return d;
+  }
+
+  async function load() {
+    const msg = $('#login-msg');
+    try {
+      users = (await api()).users;
+      try { sessionStorage.setItem(KEY, key); } catch (e) { /* ignoré */ }
+      $('#login').hidden = true; $('#panel').hidden = false;
+      render();
+    } catch (e) {
+      $('#login').hidden = false; $('#panel').hidden = true;
+      msg.textContent = e.message; msg.className = 'msg bad';
+      if (e.auth) { key = ''; try { sessionStorage.removeItem(KEY); } catch (err) { /* ignoré */ } }
+    }
+  }
+
+  function render() {
+    const now = Date.now(), day = 864e5;
+    const active7 = users.filter((u) => now - new Date(u.lastSeen) < 7 * day).length;
+    const new7 = users.filter((u) => now - new Date(u.createdAt) < 7 * day).length;
+    const scripts = users.reduce((s, u) => s + ((u.summary && u.summary.scripts) || 0), 0);
+    $('#stats').innerHTML = [
+      [users.length, 'utilisateurs'], [active7, 'actifs sur 7 jours'], [new7, 'nouveaux sur 7 jours'],
+      [scripts, 'scripts enregistrés'], [users.filter((u) => u.blocked).length, 'comptes bloqués'],
+    ].map(([n, l]) => `<div class="stat"><b>${n}</b><span>${l}</span></div>`).join('');
+
+    const q = $('#q').value.trim().toLowerCase(), by = $('#sort').value;
+    const val = (u) => (by === 'scripts' ? (u.summary && u.summary.scripts) || 0 : by === 'opens' ? u.opens : u[by] || '');
+    const list = users.filter((u) => !q || u.email.includes(q)).sort((a, b) => (val(a) < val(b) ? 1 : val(a) > val(b) ? -1 : 0));
+    $('#count').textContent = `${list.length} utilisateur${list.length > 1 ? 's' : ''}${q ? ' trouvé' + (list.length > 1 ? 's' : '') : ''}`;
+    $('#users').innerHTML = list.map((u) => {
+      const s = u.summary || {};
+      return `<div class="user${u.blocked ? ' blocked' : ''}" data-email="${esc(u.email)}">
+        <div class="u-head"><span class="u-mail">${esc(u.email)}</span><span class="u-dates">vu ${ago(u.lastSeen)}</span></div>
+        <div class="u-dates">Inscrit le ${fmt(u.createdAt)} · dernière sauvegarde ${fmt(u.updatedAt)} · ${u.opens} connexion${u.opens > 1 ? 's' : ''}</div>
+        <div class="chips">
+          <span class="chip">${s.scripts ?? 0} script(s)</span><span class="chip">${s.tabs ?? 0} onglet(s)</span>
+          <span class="chip">${s.history ?? 0} entrée(s) d’historique</span><span class="chip">${s.packages ?? 0} paquet(s)</span>
+          <span class="chip ${u.blocked ? 'off' : 'on'}">${u.blocked ? 'bloqué' : 'actif'}</span>
+        </div>
+        <div class="u-actions">
+          <button type="button" class="ghost" data-a="${u.blocked ? 'unblock' : 'block'}">${u.blocked ? 'Débloquer' : 'Bloquer'}</button>
+          <button type="button" class="danger" data-a="delete">Supprimer le compte</button>
+        </div></div>`;
+    }).join('') || '<p class="msg">Aucun utilisateur.</p>';
+  }
+
+  $('#login-form').addEventListener('submit', (e) => { e.preventDefault(); key = $('#key').value.trim(); if (key) load(); });
+  $('#q').addEventListener('input', render);
+  $('#sort').addEventListener('change', render);
+  $('#refresh').addEventListener('click', load);
+  $('#logout').addEventListener('click', () => {
+    key = ''; try { sessionStorage.removeItem(KEY); } catch (e) { /* ignoré */ }
+    $('#key').value = ''; $('#panel').hidden = true; $('#login').hidden = false;
+    $('#login-msg').textContent = 'Session admin fermée.'; $('#login-msg').className = 'msg';
+  });
+  $('#users').addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-a]'); if (!b) return;
+    const email = b.closest('.user').dataset.email, action = b.dataset.a;
+    const ask = { block: `Bloquer ${email} ? Il ne pourra plus se connecter ni sauvegarder.`, delete: `Supprimer définitivement le compte ${email} et toute sa progression en ligne ?` };
+    if (ask[action] && !confirm(ask[action])) return;
+    b.disabled = true;
+    try { await api({ method: 'POST', body: JSON.stringify({ email, action }) }); await load(); }
+    catch (err) { alert(err.message); b.disabled = false; }
+  });
+  $('#csv').addEventListener('click', () => {
+    const cols = ['email', 'createdAt', 'lastSeen', 'updatedAt', 'opens', 'blocked', 'scripts', 'tabs', 'history', 'packages'];
+    const rows = users.map((u) => cols.map((c) => (u[c] ?? (u.summary || {})[c] ?? '')).map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','));
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([[cols.join(','), ...rows].join('\n')], { type: 'text/csv' }));
+    a.download = `console-r_utilisateurs_${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  });
+
+  if (key) load();
+})();
+</script>
+</body>
+</html>
