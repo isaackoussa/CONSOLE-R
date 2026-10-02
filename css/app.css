@@ -280,3 +280,9 @@ body.rc {
   flex: none; width: 36px; padding: 4px 0; margin-bottom: 4px; font-size: 20px; line-height: 1;
   background: transparent; color: var(--accent); border: 1px dashed var(--line); border-radius: 10px;
 }
+
+/* ------------------------------------------------ Compte */
+.ac-row { position: static; padding: 0; margin: 8px 0 0; background: none; }
+.ac-row input { min-width: 0; }
+.ac-card { flex-wrap: wrap; border-color: var(--good); }
+.ac-card small.bad { color: var(--bad); }

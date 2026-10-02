@@ -3,6 +3,8 @@
  * Éditeur de script + console, graphiques, catalogue et recherche de paquets dans le dépôt webR.
  * Le premier lancement télécharge R (~25 Mo) ; le service worker le garde ensuite en cache.
  */
+import * as sync from './sync.js';
+
 const WEBR_URLS = ['https://webr.r-wasm.org/v0.6.0/webr.mjs', 'https://webr.r-wasm.org/latest/webr.mjs'];
 const HOME = '/home/web_user';
 const BASE_PKGS = new Set(['base', 'stats', 'utils', 'graphics', 'grDevices', 'methods', 'datasets', 'tools', 'grid',
@@ -156,9 +158,18 @@ chol(A)`],
 
 // ------------------------------------------------------------------ outils
 const $ = (s) => document.querySelector(s);
+// Données sauvegardées en ligne avec le compte (voir « compte et synchronisation »)
+const SYNCED = ['scripts', 'scriptsDel', 'sessions', 'sessionsDel', 'sheets', 'notes', 'cmds', 'pkgs'];
+const syncState = { applying: false };
 const store = {
   get(k, d) { try { const v = localStorage.getItem('consoler:' + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
-  set(k, v) { try { localStorage.setItem('consoler:' + k, JSON.stringify(v)); } catch (e) { /* stockage indisponible */ } },
+  set(k, v) {
+    try { localStorage.setItem('consoler:' + k, JSON.stringify(v)); } catch (e) { /* stockage indisponible */ }
+    if (SYNCED.includes(k) && !syncState.applying) { // donnée sauvegardée en ligne : date de modification + envoi différé
+      try { localStorage.setItem('consoler:mt:' + k, String(Date.now())); } catch (e) { /* idem */ }
+      if (typeof scheduleSync === 'function') scheduleSync();
+    }
+  },
   del(k) { try { localStorage.removeItem('consoler:' + k); } catch (e) { /* idem */ } },
 };
 const THEMES = ['auto', 'light', 'dark'], THEME_NAMES = { auto: 'auto', light: 'clair', dark: 'sombre' };
@@ -548,6 +559,7 @@ addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout((
 
 // ------------------------------------------------------------------ enregistrement sur le téléphone
 function toast(msg) {
+  document.querySelectorAll('.rc-toast').forEach((x) => x.remove());
   const t = document.createElement('div'); t.className = 'rc-toast'; t.textContent = msg; t.setAttribute('role', 'status');
   document.body.appendChild(t); setTimeout(() => t.remove(), 2600);
 }
@@ -635,7 +647,7 @@ $('#hi-list').addEventListener('click', async (ev) => {
   else if (a === 'copy') {
     try { await navigator.clipboard.writeText(e.code); toast('Copié'); } catch (err) { toast('Copie impossible'); }
   } else if (a === 'del' && confirm('Supprimer ce script de l’historique ?')) {
-    sessions.splice(+it.dataset.i, 1); saveSessions(); renderHistory();
+    markDeleted('sessionsDel', [e.id]); sessions.splice(+it.dataset.i, 1); saveSessions(); renderHistory();
   }
 });
 function historyAsR() {
@@ -645,7 +657,7 @@ function historyAsR() {
 $('#hi-export').addEventListener('click', () => saveFile(`historique_${stamp()}.R`, historyAsR(), 'text/plain'));
 $('#hi-clear').addEventListener('click', () => {
   if (!sessions.length || !confirm('Effacer tout l’historique ?')) return;
-  sessions.length = 0; scriptSid = newSid(); consoleSid = newSid(); syncSheet(); saveSessions(); renderHistory();
+  markDeleted('sessionsDel', sessions.map((x) => x.id)); sessions.length = 0; scriptSid = newSid(); consoleSid = newSid(); syncSheet(); saveSessions(); renderHistory();
 });
 
 // ------------------------------------------------------------------ mes scripts, notes, exports
@@ -693,7 +705,7 @@ $('#fi-scripts').addEventListener('click', (e) => {
   }
   else if (a === 'dl') saveFile(`${n}.R`, scripts[n].code, 'text/plain');
   else if (a === 'del' && confirm(`Supprimer le script « ${n} » ?`)) {
-    delete scripts[n]; store.set('scripts', scripts);
+    markDeleted('scriptsDel', [n]); delete scripts[n]; store.set('scripts', scripts);
     sheets.forEach((x) => { if (x.linked === n) x.linked = ''; });
     if (n === current) setCurrent('');
     syncSheet(); renderScripts();
@@ -776,6 +788,8 @@ $('#fi-rfiles').addEventListener('click', async (e) => {
 // ------------------------------------------------------------------ feuilles de script (onglets)
 // Plusieurs scripts ouverts en même temps, comme les onglets de RStudio. Chaque feuille a sa propre entrée d'historique.
 const sheets = store.get('sheets', null) || [{ id: newSid(), n: 1, code: store.get('script', DEFAULT_SCRIPT), linked: current, sid: scriptSid }];
+// premier lancement : l'onglet par défaut est enregistré sans date, pour qu'une sauvegarde en ligne plus ancienne l'emporte
+if (!store.get('sheets', null)) { syncState.applying = true; store.set('sheets', sheets); syncState.applying = false; }
 let active = store.get('activeSheet', '');
 if (!sheets.some((x) => x.id === active)) active = sheets[0].id;
 const sheet = () => sheets.find((x) => x.id === active);
@@ -788,7 +802,9 @@ function sheetTitle(x) {
 function syncSheet() {
   const x = sheet(); if (!x) return;
   x.code = editor.value; x.linked = current; x.sid = scriptSid;
-  store.set('sheets', sheets); store.set('activeSheet', active);
+  // n'écrit (et ne date) que si quelque chose a changé : la synchronisation garde ainsi la version la plus récente
+  if (JSON.stringify(sheets) !== localStorage.getItem('consoler:sheets')) store.set('sheets', sheets);
+  store.set('activeSheet', active);
   renderTabs();
 }
 function loadSheet(id) {
@@ -985,6 +1001,136 @@ $('#rc-install').addEventListener('click', async () => {
   if (!installPrompt) return;
   installPrompt.prompt(); await installPrompt.userChoice; installPrompt = null; $('#rc-install').hidden = true; setMenu(false);
 });
+
+// ------------------------------------------------------------------ compte et synchronisation
+// Une sauvegarde JSON par compte. Fusion : scripts et historique entrée par entrée (la plus récente gagne,
+// les suppressions sont mémorisées), notes, onglets, commandes et paquets en bloc (le plus récent gagne).
+function markDeleted(key, ids) {
+  const del = store.get(key, {}); const now = Date.now();
+  for (const id of ids) del[id] = now;
+  store.set(key, del);
+}
+const mtime = (k) => Number(localStorage.getItem('consoler:mt:' + k) || 0);
+function localDoc() {
+  const d = { v: 1 };
+  for (const k of SYNCED) d[k] = { t: mtime(k), v: store.get(k, null) };
+  return d;
+}
+function mergeDocs(a, b) {
+  const pick = (k) => ((b[k] && b[k].t > (a[k] ? a[k].t : 0)) ? b[k] : a[k] || b[k] || { t: 0, v: null });
+  const m = { v: 1 };
+  for (const k of SYNCED) m[k] = pick(k);
+  const delMerge = (k) => {
+    const out = { ...(a[k] && a[k].v) }; for (const [id, t] of Object.entries((b[k] && b[k].v) || {})) out[id] = Math.max(out[id] || 0, t);
+    return { t: Math.max(a[k] ? a[k].t : 0, b[k] ? b[k].t : 0), v: out };
+  };
+  m.scriptsDel = delMerge('scriptsDel'); m.sessionsDel = delMerge('sessionsDel');
+  const sc = { ...((a.scripts && a.scripts.v) || {}) };
+  for (const [n, x] of Object.entries((b.scripts && b.scripts.v) || {})) if (!sc[n] || x.t > sc[n].t) sc[n] = x;
+  for (const n of Object.keys(sc)) if ((m.scriptsDel.v[n] || 0) >= sc[n].t) delete sc[n];
+  m.scripts = { t: Math.max(a.scripts ? a.scripts.t : 0, b.scripts ? b.scripts.t : 0), v: sc };
+  const se = new Map();
+  for (const x of [...((a.sessions && a.sessions.v) || []), ...((b.sessions && b.sessions.v) || [])]) if (!se.has(x.id) || x.t > se.get(x.id).t) se.set(x.id, x);
+  const list = [...se.values()].filter((x) => !m.sessionsDel.v[x.id]).sort((x, y) => x.t - y.t).slice(-300);
+  m.sessions = { t: Math.max(a.sessions ? a.sessions.t : 0, b.sessions ? b.sessions.t : 0), v: list };
+  return m;
+}
+function applyDoc(m) {
+  syncState.applying = true;
+  try {
+    for (const k of SYNCED) {
+      if (m[k].v === null) continue;
+      store.set(k, m[k].v);
+      try { localStorage.setItem('consoler:mt:' + k, String(m[k].t)); } catch (e) { /* ignoré */ }
+    }
+    for (const n of Object.keys(scripts)) delete scripts[n];
+    Object.assign(scripts, m.scripts.v || {});
+    sessions.splice(0, sessions.length, ...(m.sessions.v || []));
+    if (m.cmds.v) { cmds.splice(0, cmds.length, ...m.cmds.v); hIdx = cmds.length; }
+    if (m.pkgs.v) { wanted.clear(); m.pkgs.v.forEach((x) => wanted.add(x)); }
+    if (m.notes.v !== null && document.activeElement !== notes) notes.value = m.notes.v;
+    if (m.sheets.v && m.sheets.v.length && document.activeElement !== editor) {
+      sheets.splice(0, sheets.length, ...m.sheets.v);
+      loadSheet(sheets.some((x) => x.id === active) ? active : sheets[0].id);
+    }
+  } finally { syncState.applying = false; }
+  renderScripts();
+  if (main.dataset.view === 'hist') renderHistory();
+}
+let syncTimer = 0, syncBusy = false, syncAgain = false, lastSync = 0, syncErr = '';
+function scheduleSync(delay = 4000) {
+  if (!sync.configured() || !sync.user()) return;
+  clearTimeout(syncTimer); syncTimer = setTimeout(syncNow, delay);
+}
+async function syncNow() {
+  if (!sync.configured() || !sync.user()) return;
+  if (syncBusy) { syncAgain = true; return; }
+  syncBusy = true; renderAccount('Synchronisation…');
+  try {
+    snapshotScript(); syncSheet();
+    const remote = await sync.pull();
+    const merged = remote && remote.v ? mergeDocs(localDoc(), remote) : localDoc();
+    if (remote && remote.v) applyDoc(merged);
+    if (JSON.stringify(merged) !== JSON.stringify(remote)) await sync.push(merged);
+    lastSync = Date.now(); syncErr = '';
+  } catch (e) {
+    syncErr = navigator.onLine === false ? 'hors ligne, nouvel essai plus tard' : String(e.message || e);
+  } finally {
+    syncBusy = false; renderAccount();
+    if (syncAgain) { syncAgain = false; scheduleSync(1000); }
+  }
+}
+function renderAccount(state) {
+  const on = sync.configured() && !!sync.user();
+  $('#ac-na').hidden = sync.configured();
+  $('#ac-off').hidden = !sync.configured() || on;
+  $('#ac-on').hidden = !on;
+  if (!on) return;
+  $('#ac-who').textContent = sync.user().email || 'Compte connecté';
+  const st = $('#ac-state');
+  st.className = syncErr && !state ? 'bad' : '';
+  st.textContent = state || (syncErr ? `Échec de la synchronisation : ${syncErr}`
+    : lastSync ? `Sauvegardé en ligne à ${fmtTime(lastSync)} · synchronisation automatique` : 'Synchronisation automatique activée');
+}
+const acMsg = (t) => { $('#ac-msg').textContent = t; };
+$('#ac-send').addEventListener('click', async () => {
+  const email = $('#ac-email').value.trim();
+  if (!/^\S+@\S+\.\S+$/.test(email)) { acMsg('Adresse e-mail invalide.'); $('#ac-email').focus(); return; }
+  $('#ac-send').disabled = true; acMsg('Envoi…');
+  try {
+    await sync.sendCode(email); store.set('acEmail', email);
+    $('#ac-code-row').hidden = false; $('#ac-code').focus();
+    acMsg(`E-mail envoyé à ${email}. Tapez le code reçu, ou touchez le lien de l’e-mail sur ce téléphone. (Pensez aux spams.)`);
+  } catch (e) { acMsg(`Envoi impossible : ${e.message || e}`); }
+  finally { $('#ac-send').disabled = false; }
+});
+async function verify() {
+  const code = $('#ac-code').value.replace(/\s+/g, '');
+  if (!code) { $('#ac-code').focus(); return; }
+  $('#ac-verify').disabled = true; acMsg('Vérification…');
+  try { await sync.verifyCode($('#ac-email').value.trim(), code); acMsg(''); $('#ac-code').value = ''; $('#ac-code-row').hidden = true; toast('Connecté'); await syncNow(); }
+  catch (e) { acMsg(`Code refusé : ${e.message || e}`); }
+  finally { $('#ac-verify').disabled = false; renderAccount(); }
+}
+$('#ac-verify').addEventListener('click', verify);
+$('#ac-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); verify(); } });
+$('#ac-sync').addEventListener('click', syncNow);
+$('#ac-out').addEventListener('click', () => {
+  if (!confirm('Se déconnecter ? Vos données restent sur ce téléphone et dans votre sauvegarde en ligne.')) return;
+  sync.signOut(); lastSync = 0; renderAccount();
+});
+$('#ac-email').value = store.get('acEmail', '');
+addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') { if (syncTimer) { clearTimeout(syncTimer); syncNow(); } }
+  else if (Date.now() - lastSync > 60e3) scheduleSync(500);
+});
+addEventListener('online', () => scheduleSync(500));
+renderAccount();
+if (sync.configured()) {
+  sync.handleRedirect().then((u) => { if (u) { toast(`Connecté : ${u.email}`); setView('files'); } })
+    .catch((e) => toast(`Connexion par lien impossible : ${e.message || e}`))
+    .finally(() => { renderAccount(); scheduleSync(300); });
+}
 
 // ------------------------------------------------------------------ lancement
 if ('serviceWorker' in navigator && isSecureContext) {
