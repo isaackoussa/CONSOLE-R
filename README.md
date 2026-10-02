@@ -8,6 +8,13 @@ R complet dans le navigateur, pensé pour le téléphone. R 4 est compilé en We
 - **Plusieurs scripts ouverts en même temps**, en onglets comme dans RStudio : « + » ouvre une feuille, toucher l’onglet
   actif le nomme (et l’enregistre dans *Mes scripts*), « × » le ferme ; les onglets sont conservés à la réouverture.
 - **Script** : éditeur, « Tout exécuter », « Ligne / sélection » (Ctrl+Entrée), ouverture de fichiers `.R` du téléphone.
+- **Assistant de code** (comme IntelliSense dans VS Code) : en tapant, des propositions apparaissent au-dessus du
+  clavier — fonctions, objets, arguments (`na.rm =`), colonnes après `$`, fonctions d’un paquet après `::`, noms de
+  paquets dans `library()` — fournies par le moteur de complétion de R ; la signature de la fonction en cours
+  (`mean(x, ...)`) s’affiche ; modèles de code ⚡ (`for`, `if`, `fun`, `ggplot`, `lm`, `ts`, `arima`, `readcsv`…).
+  Un appui ou Tab insère la proposition ; Ctrl+Espace force l’affichage, Échap le masque.
+- **Lire des séries sur internet** : `read.csv("https://…")`, `scan(url)`, `download.file()`, `url()` passent par le
+  serveur de l’application (`/api/fetch`), car le navigateur bloque la plupart des sites de données (CORS).
 - **Console** : invite `>`, saisie sur plusieurs lignes (`+`), commandes précédentes avec ↑/↓, erreurs et avis affichés comme dans R.
 - **Graphiques** affichés dans la console (base R, ggplot2, lattice…) ; appui long pour enregistrer l’image.
 - **Historique par script** : chaque script devient une entrée quand on le quitte (changement d’onglet, fermeture de
@@ -92,7 +99,7 @@ css/app.css           thème clair/sombre, mise en page mobile
 js/app.js             démarrage de webR, exécution, graphiques, onglets de scripts, historique, fichiers, paquets
 sw.js                 service worker (hors ligne, cache de R et des paquets)
 js/cloud.js           compte : code e-mail, sauvegarde et lecture de la progression
-netlify/functions/    API : envoi du code, vérification, progression, compte
+netlify/functions/    API : envoi du code, vérification, progression, compte, admin, relais de téléchargement
 netlify/lib/          stockage (Netlify Blobs), e-mails Brevo
 tests/serveur-local.mts  serveur de test local (npm run dev)
 manifest.webmanifest  application installable

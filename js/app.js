@@ -43,8 +43,16 @@ local({
         }, error = function(err) {
           call <- conditionCall(err)
           if (identical(call, quote(eval(exprs[[i]], envir = globalenv())))) call <- NULL
+          msg <- conditionMessage(err)
+          # erreurs du relais de téléchargement : on montre l'adresse demandée, pas celle du relais
+          if (!is.null(call) && grepl("^o_(file|url|dl)\\(", deparse(call, nlines = 1)[1])) call <- NULL
           where <- if (is.null(call)) "" else paste0(" dans ", deparse(call, nlines = 1)[1])
-          emit("\002", paste0("Erreur", where, " : ", conditionMessage(err)))
+          while (length(m <- regmatches(msg, regexec("https?://[^ ']*/api/fetch\\?url=([^ ']+)", msg))[[1]]))
+            msg <- sub(m[1], utils::URLdecode(m[2]), msg, fixed = TRUE)
+          msg <- sub("\\. See the Javascript console for further information", "", msg)
+          if (grepl("cannot open|URL|connection", msg, ignore.case = TRUE) && grepl("https?://", paste(deparse(exprs[[i]]), collapse = "")))
+            msg <- paste0(msg, "\n  → Lecture depuis internet impossible : vérifiez l'adresse (lien direct vers le fichier CSV/TXT, pas la page web) et la connexion.")
+          emit("\002", paste0("Erreur", where, " : ", msg))
           FALSE
         }),
         warning = function(w) {
@@ -84,6 +92,53 @@ local({
     if (!file.exists(fichier)) stop("fichier introuvable : ", fichier, call. = FALSE)
     cat("\004", normalizePath(fichier), "\n", sep = "")
     invisible(fichier)
+  }
+  # Lectures internet (read.csv("https://…"), scan, url, download.file) relayées par le serveur de l'application :
+  # le navigateur bloque la plupart des sites de données (CORS). Les dépôts de paquets restent en accès direct.
+  e$use_proxy <- function(proxy) {
+    direct <- "^https?://([^/]*\\.)?(r-wasm\\.org|r-universe\\.dev|githubusercontent\\.com|jsdelivr\\.net)(/|$)"
+    prox <- function(u) {
+      if (is.character(u) && length(u) == 1L && grepl("^https?://", u) && !startsWith(u, proxy) && !grepl(direct, u))
+        paste0(proxy, "?url=", utils::URLencode(u, reserved = TRUE)) else u
+    }
+    patch <- function(name, ns, f) {
+      for (env in list(asNamespace(ns), as.environment(paste0("package:", ns)))) {
+        if (!exists(name, envir = env, inherits = FALSE)) next
+        unlockBinding(name, env); assign(name, f, envir = env); lockBinding(name, env)
+      }
+    }
+    o_url <- base::url; o_file <- base::file; o_dl <- utils::download.file
+    patch("url", "base", function(description, ...) o_url(prox(description), ...))
+    patch("file", "base", function(description = "", ...) o_file(prox(description), ...))
+    patch("download.file", "utils", function(url, destfile, ...) o_dl(prox(url), destfile, ...))
+    invisible(TRUE)
+  }
+  # Assistant de code : complétion de R (la même que Tab dans la console R) + signature de la fonction en cours
+  utils::rc.settings(func = TRUE, ipck = TRUE)
+  e$assist <- function(line, fname) {
+    out <- list(token = "", comps = character(), sig = "")
+    try({
+      utils:::.assignLinebuffer(line)
+      utils:::.assignEnd(nchar(line))
+      out$token <- utils:::.guessTokenFromLine()
+      utils:::.completeToken()
+      out$comps <- utils::head(utils:::.retrieveCompletions(), 60)
+    }, silent = TRUE)
+    if (nzchar(fname)) try({
+      f <- eval(parse(text = fname), envir = globalenv())
+      if (is.function(f)) {
+        a <- if (is.primitive(f)) args(f) else f
+        fm <- formals(a)
+        if (!is.null(fm)) {
+          parts <- vapply(names(fm), function(n) {
+            d <- deparse(fm[[n]], width.cutoff = 60L) # argument sans valeur par défaut : ""
+            if (!nzchar(d[1])) n else paste0(n, " = ", paste(d, collapse = ""))
+          }, "")
+          out$sig <- paste0(fname, "(", paste(parts, collapse = ", "), ")")
+        }
+      }
+    }, silent = TRUE)
+    out
   }
   attach(e, name = "tools:console")
 })
@@ -192,6 +247,7 @@ function setView(v) {
   main.dataset.view = v;
   document.querySelectorAll('.rc-nav button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.view === v)));
   $('#rc-keys').hidden = v !== 'script' && v !== 'console';
+  if (typeof hideSuggest === 'function') hideSuggest();
   if (v === 'pkgs') refreshPkgs();
   if (v === 'hist') renderHistory();
   if (v === 'files') { renderScripts(); refreshRFiles(); }
@@ -248,6 +304,7 @@ async function start() {
   await webR.init();
   status('Préparation…', 'busy');
   await webR.evalRVoid(R_HELPERS);
+  if (await cloud.available()) await webR.evalRVoid(`get("use_proxy", "tools:console")(${JSON.stringify(location.origin + location.pathname.replace(/[^/]*$/, '') + 'api/fetch')})`);
   await syncWidth();
   status(`R ${webR.versionR || ''} prêt`, 'ok');
   restorePkgs();
@@ -299,8 +356,11 @@ async function syncWidth() {
   await webR.evalRVoid(`options(width = ${cols})`);
 }
 
+let running = false;
 function runCode(code, { echo = true, partial = false } = {}) {
+  hideSuggest();
   return enqueue(async () => {
+    running = true;
     const shelter = await new webR.Shelter();
     const c = newCell();
     try {
@@ -326,6 +386,7 @@ function runCode(code, { echo = true, partial = false } = {}) {
       info(`<span class="rc-err">${esc(String(e && e.message || e))}</span>`, c);
       return 'error';
     } finally {
+      running = false;
       shelter.purge();
       scrollEnd();
       if (main.dataset.view !== 'console' && !(wide.matches && main.dataset.view === 'script')) $('#tab-console').classList.add('dot');
@@ -379,7 +440,7 @@ $('#rc-run-all').addEventListener('click', runAll);
 $('#rc-run-sel').addEventListener('click', runSelection);
 editor.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); if (e.shiftKey) runAll(); else runSelection(); }
-  else if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); insert(editor, '  '); }
+  else if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); if (!acceptSuggest()) insert(editor, '  '); }
 });
 
 // ------------------------------------------------------------------ console interactive
@@ -470,6 +531,7 @@ function browseHistory(dir) {
   const n = input.value.length; input.setSelectionRange(n, n);
 }
 input.addEventListener('keydown', (e) => {
+  if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); acceptSuggest(); return; }
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); }
   else if (e.key === 'ArrowUp' && !input.value.slice(0, input.selectionStart).includes('\n')) { e.preventDefault(); browseHistory(-1); }
   else if (e.key === 'ArrowDown' && !input.value.slice(input.selectionEnd).includes('\n')) { e.preventDefault(); browseHistory(1); }
@@ -505,6 +567,164 @@ KEYS.forEach(([label, fn]) => {
   b.addEventListener('click', () => { fn(); target.focus(); });
   keysEl.appendChild(b);
 });
+
+
+// ------------------------------------------------------------------ assistant de code (autocomplétion)
+// Comme IntelliSense dans VS Code : en tapant, des propositions apparaissent au-dessus du clavier — fonctions, objets,
+// arguments (« na.rm = »), colonnes après $, fonctions d'un paquet après ::, noms de paquets dans library() —
+// fournies par le moteur de complétion de R lui-même, plus des modèles de code (for, if, function, ggplot…).
+// Un appui (ou Tab) insère la proposition ; la signature de la fonction en cours s'affiche au-dessus.
+const SNIPPETS = [
+  ['for', 'for (i in seq_along(x)) {\n  $0\n}', 'boucle for'],
+  ['if', 'if ($0) {\n  \n}', 'condition'],
+  ['ifelse', 'if ($0) {\n  \n} else {\n  \n}', 'si / sinon'],
+  ['while', 'while ($0) {\n  \n}', 'boucle while'],
+  ['fun', 'ma_fonction <- function(x) {\n  $0\n}', 'nouvelle fonction'],
+  ['function', 'function(x) {\n  $0\n}', 'fonction anonyme'],
+  ['lib', 'library($0)', 'charger un paquet'],
+  ['df', 'df <- data.frame(\n  x = $0,\n  y = \n)', 'tableau de données'],
+  ['readcsv', 'donnees <- read.csv("$0")\nhead(donnees)', 'lire un CSV'],
+  ['lm', 'fit <- lm(y ~ x, data = $0)\nsummary(fit)', 'régression linéaire'],
+  ['glm', 'fit <- glm(y ~ x, family = binomial, data = $0)\nsummary(fit)', 'régression logistique'],
+  ['ggplot', 'ggplot($0, aes(x = , y = )) +\n  geom_point()', 'graphique ggplot2'],
+  ['ts', 'serie <- ts($0, start = c(2000, 1), frequency = 12)', 'série temporelle'],
+  ['arima', 'fit <- arima(serie, order = c($0, 0, 0))\nfit', 'modèle ARIMA'],
+  ['sapply', 'sapply(x, function(v) $0)', 'appliquer une fonction'],
+  ['tryCatch', 'tryCatch({\n  $0\n}, error = function(e) {\n  message(conditionMessage(e))\n})', 'gérer une erreur'],
+  ['pipe', 'donnees |>\n  $0', 'chaîne |>'],
+];
+const R_WORDS = ['library', 'function', 'return', 'print', 'summary', 'head', 'tail', 'length', 'names', 'c', 'list', 'data.frame',
+  'matrix', 'mean', 'median', 'sd', 'var', 'sum', 'plot', 'hist', 'lines', 'points', 'abline', 'paste', 'paste0', 'seq', 'rep',
+  'read.csv', 'write.csv', 'apply', 'sapply', 'lapply', 'TRUE', 'FALSE', 'NULL', 'NA', 'ifelse', 'which', 'subset', 'table', 'str'];
+const sugEl = $('#rc-suggest'), sigEl = $('#sg-sig'), listEl = $('#sg-list');
+let sg = { el: null, token: '', items: [], sel: 0 }, sgTimer = 0, sgSeq = 0;
+
+function hideSuggest() { sg.items = []; if (sugEl) sugEl.hidden = true; }
+// Texte avant le curseur, sans les chaînes ni commentaires pour repérer l'appel de fonction en cours
+function before(el) { return el.value.slice(Math.max(0, el.selectionStart - 2000), el.selectionStart); }
+function inComment(line) {
+  let q = null;
+  for (const ch of line) { if (q) { if (ch === q) q = null; } else if (ch === '"' || ch === "'") q = ch; else if (ch === '#') return true; }
+  return false;
+}
+function callName(text) {
+  let depth = 0, q = null;
+  for (let i = text.length - 1; i >= 0; i--) {
+    const ch = text[i];
+    if (q) { if (ch === q) q = null; continue; }
+    if (ch === '"' || ch === "'") { q = ch; continue; }
+    if (ch === ')' || ch === ']') depth++;
+    else if (ch === '(' || ch === '[') {
+      if (depth === 0) {
+        if (ch === '[') return null;
+        const m = /([A-Za-z.][\w.]*(?:::[A-Za-z.][\w.]*)?)\s*$/.exec(text.slice(0, i));
+        return m && !/^(if|for|while|function)$/.test(m[1]) ? m[1] : null;
+      }
+      depth--;
+    }
+  }
+  return null;
+}
+function localWords(el, token) {
+  const set = new Set(R_WORDS);
+  for (const m of (editor.value + '\n' + el.value).matchAll(/[A-Za-z.][\w.]{2,}/g)) set.add(m[0]);
+  return [...set].filter((w) => w !== token && w.startsWith(token)).slice(0, 12);
+}
+function scheduleSuggest(el, force = false) {
+  clearTimeout(sgTimer);
+  sgTimer = setTimeout(() => computeSuggest(el, force), force ? 0 : 140);
+}
+async function computeSuggest(el, force) {
+  const seq = ++sgSeq;
+  const text = before(el), line = text.slice(text.lastIndexOf('\n') + 1);
+  if (inComment(line) || (document.activeElement !== el && !force)) { hideSuggest(); return; }
+  const tokenGuess = (/[A-Za-z.][\w.]*$/.exec(line) || [''])[0];
+  const fname = callName(text) || '';
+  const argMode = /[(,]\s*$/.test(line);
+  const accessMode = /(\$|@|::)[\w.]*$/.test(line);
+  if (!force && !tokenGuess && !argMode && !accessMode) { showSuggest(el, '', [], fname ? sg.sig : ''); if (!fname) hideSuggest(); }
+  let token = tokenGuess, comps = [], sig = '';
+  if (webR && !running && (tokenGuess || argMode || accessMode || fname || force)) {
+    const sh = await new webR.Shelter();
+    try {
+      const r = await sh.evalR('get("assist", "tools:console")(line, fname)', { env: { line, fname } });
+      const j = await r.toJs();
+      const val = (n) => j.values[j.names.indexOf(n)].values;
+      token = val('token')[0] || ''; comps = val('comps') || []; sig = val('sig')[0] || '';
+    } catch (e) { /* R occupé ou complétion impossible : propositions locales */ } finally { sh.purge(); }
+  } else if (tokenGuess) comps = localWords(el, tokenGuess);
+  if (seq !== sgSeq) return; // une frappe plus récente a pris le relais
+  // après « ( » ou « , », R propose aussi tout l'environnement : on ne garde que les arguments
+  if (!token && argMode) comps = comps.filter((c) => /=\s*$/.test(c));
+  comps = comps.filter((c) => c !== token && c.trim());
+  const items = [];
+  if (token.length >= 2 && !accessMode) {
+    for (const [k, body, detail] of SNIPPETS) if (k.startsWith(token)) items.push({ kind: 'snip', label: k, body, detail });
+  }
+  for (const c of comps.slice(0, 40)) items.push({ kind: /=\s*$/.test(c) ? 'arg' : /\($/.test(c) ? 'fun' : 'obj', label: c });
+  // noms déjà écrits dans le script (variables pas encore exécutées), après ceux que R connaît
+  if (token.length >= 2 && !accessMode) {
+    const known = new Set(comps.map((c) => c.replace(/\($/, '')));
+    for (const w of localWords(el, token)) if (!known.has(w) && !R_WORDS.includes(w)) items.push({ kind: 'obj', label: w });
+  }
+  sg.sig = sig;
+  showSuggest(el, token, items, sig);
+}
+function showSuggest(el, token, items, sig) {
+  sg = { el, token, items, sel: 0, sig };
+  if (!items.length && !sig) { sugEl.hidden = true; return; }
+  sigEl.hidden = !sig; sigEl.textContent = sig;
+  listEl.replaceChildren(...items.map((it, i) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = `sg-item ${it.kind}${i === 0 ? ' sel' : ''}`; b.dataset.i = i;
+    b.innerHTML = `<span class="sg-k">${{ snip: '⚡', arg: '=', fun: 'ƒ', obj: '◆' }[it.kind]}</span><span></span>${it.detail ? `<small>${esc(it.detail)}</small>` : ''}`;
+    b.children[1].textContent = it.kind === 'fun' ? it.label.replace(/\($/, '()') : it.label.replace(/\s*=\s*$/, ' =');
+    return b;
+  }));
+  listEl.hidden = !items.length;
+  sugEl.hidden = !(main.dataset.view === 'script' || main.dataset.view === 'console');
+  listEl.scrollLeft = 0;
+}
+function applyItem(it) {
+  const el = sg.el; if (!el) return;
+  const end = el.selectionStart, startTok = end - sg.token.length;
+  if (it.kind === 'snip') {
+    const lineStart = el.value.lastIndexOf('\n', startTok - 1) + 1;
+    const indent = (/^[ \t]*/.exec(el.value.slice(lineStart)) || [''])[0];
+    const body = it.body.replace(/\n/g, `\n${indent}`);
+    const cur = body.indexOf('$0');
+    el.setRangeText(body.replace('$0', ''), startTok, end, 'end');
+    el.setSelectionRange(startTok + cur, startTok + cur);
+  } else if (it.kind === 'fun') {
+    el.setRangeText(`${it.label})`, startTok, end, 'end');
+    const p = startTok + it.label.length; el.setSelectionRange(p, p);
+  } else {
+    el.setRangeText(it.label, startTok, end, 'end');
+  }
+  el.focus();
+  el.dispatchEvent(new Event('input'));
+}
+function acceptSuggest() {
+  if (sugEl.hidden || !sg.items.length) return false;
+  applyItem(sg.items[sg.sel] || sg.items[0]);
+  return true;
+}
+listEl.addEventListener('pointerdown', (e) => e.preventDefault()); // garde le clavier ouvert
+listEl.addEventListener('click', (e) => { const b = e.target.closest('.sg-item'); if (b) applyItem(sg.items[+b.dataset.i]); });
+for (const el of [editor, input]) {
+  el.addEventListener('input', () => scheduleSuggest(el));
+  el.addEventListener('click', () => scheduleSuggest(el));
+  el.addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== editor && document.activeElement !== input) hideSuggest(); }, 150));
+  el.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === ' ') { e.preventDefault(); scheduleSuggest(el, true); }
+    else if (e.key === 'Escape' && !sugEl.hidden) { e.preventDefault(); hideSuggest(); }
+    else if (!sugEl.hidden && sg.items.length && (e.key === 'ArrowRight' || e.key === 'ArrowLeft') && e.altKey) {
+      e.preventDefault(); sg.sel = (sg.sel + (e.key === 'ArrowRight' ? 1 : -1) + sg.items.length) % sg.items.length;
+      listEl.querySelectorAll('.sg-item').forEach((b, i) => b.classList.toggle('sel', i === sg.sel));
+      listEl.children[sg.sel]?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+    }
+  });
+}
 
 // ------------------------------------------------------------------ menu outils
 const menu = $('#rc-menu'), menuBtn = $('#rc-menu-btn');

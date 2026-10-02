@@ -304,3 +304,23 @@ body.rc {
 .gate-card .ac-row { width: 100%; }
 .gate-skip { border: 0; font-size: 14px; color: var(--ink-3); }
 .lg-code-row[hidden] { display: none; }
+
+/* ------------------------------------------------ Assistant de code */
+.rc-suggest { flex: none; display: grid; gap: 4px; padding: 6px 8px 4px; background: var(--panel); border-top: 1px solid var(--line); }
+.rc-suggest[hidden], .sg-sig[hidden], .sg-list[hidden] { display: none; }
+.sg-sig {
+  font-family: var(--f-mono); font-size: 12.5px; color: var(--ink-2); white-space: nowrap; overflow-x: auto; scrollbar-width: none;
+  padding: 2px 4px;
+}
+.sg-list { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.sg-list::-webkit-scrollbar, .sg-sig::-webkit-scrollbar { display: none; }
+.sg-item {
+  flex: none; display: inline-flex; align-items: baseline; gap: 6px; padding: 6px 10px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--ink); font-family: var(--f-mono); font-size: 14px; font-weight: 500;
+  touch-action: manipulation;
+}
+.sg-item.sel { border-color: var(--accent); background: var(--accent-soft); }
+.sg-item small { font-family: var(--f-body); font-size: 11.5px; color: var(--ink-3); font-weight: 400; }
+.sg-k { font-size: 11px; color: var(--accent); width: 1ch; text-align: center; }
+.sg-item.snip .sg-k { color: var(--s2); }
+.sg-item.arg .sg-k { color: var(--s3); }

@@ -12,10 +12,11 @@ await blobs.start();
 process.env.NETLIFY_BLOBS_CONTEXT = Buffer.from(JSON.stringify({ edgeURL: "http://localhost:8798", uncachedEdgeURL: "http://localhost:8798", token: "tok", siteID: "site" })).toString("base64");
 process.env.MAIL_DRY_RUN = "1";
 process.env.ADMIN_KEY ??= "admin-local"; // clé admin du serveur de test
+process.env.FETCH_ALLOW_PRIVATE = "1"; // le relais de téléchargement accepte localhost en test
 process.env.URL = "http://localhost:8767";
 
 const routes: Record<string, (r: Request) => Promise<Response>> = {};
-for (const f of ["auth-send-code", "auth-verify", "progress", "account", "admin"]) {
+for (const f of ["auth-send-code", "auth-verify", "progress", "account", "admin", "fetch"]) {
   const m = await import(`../netlify/functions/${f}.mts`);
   routes[m.config.path] = m.default;
 }
@@ -25,7 +26,7 @@ http.createServer(async (req, res) => {
   const fn = routes[url.pathname];
   if (fn) {
     const chunks: Buffer[] = []; for await (const c of req) chunks.push(c as Buffer);
-    const r = await fn(new Request(url, { method: req.method, headers: req.headers as HeadersInit, body: ["GET", "HEAD"].includes(req.method!) ? undefined : Buffer.concat(chunks) }));
+    const r = await (fn as (r: Request, c: unknown) => Promise<Response>)(new Request(url, { method: req.method, headers: req.headers as HeadersInit, body: ["GET", "HEAD"].includes(req.method!) ? undefined : Buffer.concat(chunks) }), { ip: "127.0.0.1" });
     res.writeHead(r.status, Object.fromEntries(r.headers)); res.end(Buffer.from(await r.arrayBuffer())); return;
   }
   const p = path.join(process.cwd(), url.pathname === "/" ? "index.html" : url.pathname);
