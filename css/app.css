@@ -281,8 +281,7 @@ body.rc {
   background: transparent; color: var(--accent); border: 1px dashed var(--line); border-radius: 10px;
 }
 
-/* ------------------------------------------------ Compte */
+/* ------------------------------------------------ Sauvegarde par e-mail */
 .ac-row { position: static; padding: 0; margin: 8px 0 0; background: none; }
 .ac-row input { min-width: 0; }
-.ac-card { flex-wrap: wrap; border-color: var(--good); }
-.ac-card small.bad { color: var(--bad); }
+#ml-state { margin-top: 6px; }

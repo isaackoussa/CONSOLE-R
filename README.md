@@ -36,30 +36,18 @@ R complet dans le navigateur, pensé pour le téléphone. R 4 est compilé en We
 Le premier lancement télécharge R (~25 Mo) ; le service worker garde R et les paquets installés en cache,
 l’application fonctionne ensuite hors ligne. Limites : un calcul sans fin ne peut pas être interrompu
 (« Redémarrer R » dans le menu ⋯) ; scripts, notes et historique sont stockés dans le navigateur — faites
-régulièrement une sauvegarde complète (.json).
+régulièrement une sauvegarde par e-mail.
 
-## Compte et sauvegarde en ligne (e-mail)
+## Sauvegarde par e-mail
 
-Onglet **Fichiers → Compte** : on se connecte avec son e-mail (code reçu par e-mail, sans mot de passe). Scripts,
-onglets ouverts, notes, historique et liste de paquets sont alors sauvegardés en ligne et synchronisés entre les
-appareils, automatiquement (quelques secondes après chaque modification, à la fermeture et à la réouverture).
-La fusion garde, pour chaque script et chaque entrée d’historique, la version la plus récente ; les suppressions suivent.
+Onglet **Fichiers → Sauvegarde par e-mail** : on enregistre son adresse une fois, puis « M’envoyer ma sauvegarde »
+prépare un e-mail avec toute la progression en pièce jointe (`.json` : scripts, onglets, notes, historique, paquets).
+Sur téléphone, la feuille de partage s’ouvre (choisir Gmail, Outlook…) ; sur ordinateur, le fichier est téléchargé et
+un e-mail prérempli s’ouvre. Pour retrouver sa progression (autre téléphone, réinstallation) : **Fichiers →
+Restaurer une sauvegarde**, puis choisir la pièce jointe. Aucun compte ni serveur ; un rappel s’affiche si la
+dernière sauvegarde date de plus d’une semaine.
 
-Mise en place (une fois, gratuit) avec [Supabase](https://supabase.com) :
-
-1. Créer un compte puis un projet (*New project*).
-2. **SQL Editor → New query** : coller le contenu de [`supabase.sql`](supabase.sql) puis *Run*.
-3. **Authentication → URL Configuration** : *Site URL* = `https://isaackoussa.github.io/CONSOLE-R/`
-   (et l’ajouter aussi dans *Redirect URLs*).
-4. **Authentication → Emails → Magic Link** : pour recevoir un code à taper, ajouter `{{ .Token }}` dans le modèle
-   (ex. « Votre code : {{ .Token }} »). Sans cela, l’e-mail contient seulement un lien de connexion, qui marche aussi.
-5. **Project Settings → API** : copier *Project URL* et la clé *anon public* dans `js/config.js`.
-
-La clé *anon* est faite pour être publique : la sécurité repose sur les règles de la table (chaque compte ne lit
-que sa propre sauvegarde). Le service d’e-mail intégré de Supabase est limité à quelques e-mails par heure ;
-pour plus, brancher un SMTP (Authentication → Emails → SMTP Settings).
-
-
+## Publier et installer sur le téléphone
 
 1. Sur GitHub : **Settings → Pages → Branch : `main`, dossier `/ (root)`**.
    L’adresse sera `https://isaackoussa.github.io/CONSOLE-R/`.
@@ -82,9 +70,6 @@ python3 -m http.server 8000   # puis ouvrir http://localhost:8000
 index.html            coque de l'application (onglets Script, Console, Historique, Fichiers, Paquets)
 css/app.css           thème clair/sombre, mise en page mobile
 js/app.js             démarrage de webR, exécution, graphiques, onglets de scripts, historique, fichiers, paquets
-js/sync.js            compte e-mail et sauvegarde en ligne (Supabase)
-js/config.js          adresse et clé publique du projet Supabase
-supabase.sql          table et règles d'accès à créer dans Supabase
 sw.js                 service worker (hors ligne, cache de R et des paquets)
 manifest.webmanifest  application installable
 icons/                icônes

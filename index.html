@@ -71,20 +71,13 @@
   </section>
   <section class="rc-pane" id="pane-files" aria-labelledby="tab-files">
     <div class="pk">
-      <div id="ac">
-        <h2>Compte et sauvegarde en ligne</h2>
-        <div id="ac-off" hidden>
-          <p class="pk-hint">Connectez-vous avec votre e-mail : scripts, onglets, notes, historique et paquets sont sauvegardés en ligne
-            et synchronisés entre vos appareils (téléphone, ordinateur…). Pas de mot de passe : un code vous est envoyé par e-mail.</p>
-          <div class="pk-search ac-row"><input type="email" id="ac-email" placeholder="votre@email.com" autocomplete="email" autocapitalize="off" spellcheck="false" aria-label="Adresse e-mail"><button type="button" id="ac-send">Recevoir un code</button></div>
-          <div class="pk-search ac-row" id="ac-code-row" hidden><input type="text" id="ac-code" inputmode="numeric" autocomplete="one-time-code" placeholder="Code reçu par e-mail" aria-label="Code reçu par e-mail"><button type="button" id="ac-verify">Valider</button></div>
-          <p class="pk-hint" id="ac-msg" role="status"></p>
-        </div>
-        <div id="ac-on" hidden>
-          <div class="fi-row ac-card"><div class="fi-main"><b id="ac-who"></b><small id="ac-state"></small></div>
-            <button type="button" id="ac-sync">Synchroniser</button><button type="button" class="ghost" id="ac-out">Déconnexion</button></div>
-        </div>
-        <p class="pk-hint" id="ac-na" hidden>La sauvegarde en ligne n’est pas encore configurée (voir README, section « Compte »).</p>
+      <div id="ml">
+        <h2>Sauvegarde par e-mail</h2>
+        <p class="pk-hint">Votre progression (scripts, onglets, notes, historique, paquets) part en pièce jointe vers votre e-mail.
+          Sur un autre téléphone, ouvrez la pièce jointe avec « Restaurer une sauvegarde » ci-dessous.</p>
+        <div class="pk-search ac-row"><input type="email" id="ml-email" placeholder="votre@email.com" autocomplete="email" autocapitalize="off" spellcheck="false" aria-label="Votre adresse e-mail"></div>
+        <button type="button" class="fi-new" id="ml-send">✉ M’envoyer ma sauvegarde</button>
+        <p class="pk-hint" id="ml-state" role="status"></p>
       </div>
       <div>
         <h2>Mes scripts</h2>
