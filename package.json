@@ -1,0 +1,20 @@
+{
+  "name": "console-r",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Console R — R complet dans le navigateur (webR), avec compte e-mail et progression sauvegardée en ligne.",
+  "scripts": {
+    "dev": "node --experimental-strip-types tests/serveur-local.mts",
+    "typecheck": "tsc -p netlify/tsconfig.json",
+    "serve": "python3 -m http.server 8000"
+  },
+  "dependencies": {
+    "@netlify/blobs": "^11.1.1"
+  },
+  "devDependencies": {
+    "@netlify/functions": "^6.0.0",
+    "@types/node": "^26.6.3",
+    "typescript": "~5.9"
+  }
+}

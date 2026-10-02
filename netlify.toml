@@ -1,0 +1,16 @@
+[build]
+  # le site est statique : on copie seulement les fichiers de l'application (pas node_modules)
+  publish = "dist"
+  command = "rm -rf dist && mkdir dist && cp -r index.html manifest.webmanifest sw.js css js icons dist/"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[functions]
+  directory = "netlify/functions"
+
+# Le service worker doit toujours être revalidé pour que les mises à jour arrivent
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"

@@ -3,6 +3,8 @@
  * Éditeur de script + console, graphiques, catalogue et recherche de paquets dans le dépôt webR.
  * Le premier lancement télécharge R (~25 Mo) ; le service worker le garde ensuite en cache.
  */
+import * as cloud from './cloud.js';
+
 const WEBR_URLS = ['https://webr.r-wasm.org/v0.6.0/webr.mjs', 'https://webr.r-wasm.org/latest/webr.mjs'];
 const HOME = '/home/web_user';
 const BASE_PKGS = new Set(['base', 'stats', 'utils', 'graphics', 'grDevices', 'methods', 'datasets', 'tools', 'grid',
@@ -156,9 +158,18 @@ chol(A)`],
 
 // ------------------------------------------------------------------ outils
 const $ = (s) => document.querySelector(s);
+// Données sauvegardées en ligne avec le compte (voir « compte et progression en ligne »)
+const SYNCED = ['scripts', 'scriptsDel', 'sessions', 'sessionsDel', 'sheets', 'notes', 'cmds', 'pkgs'];
+const syncState = { applying: false };
 const store = {
   get(k, d) { try { const v = localStorage.getItem('consoler:' + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
-  set(k, v) { try { localStorage.setItem('consoler:' + k, JSON.stringify(v)); } catch (e) { /* stockage indisponible */ } },
+  set(k, v) {
+    try { localStorage.setItem('consoler:' + k, JSON.stringify(v)); } catch (e) { /* stockage indisponible */ }
+    if (SYNCED.includes(k) && !syncState.applying) { // donnée du compte : date de modification + envoi différé
+      try { localStorage.setItem('consoler:mt:' + k, String(Date.now())); } catch (e) { /* idem */ }
+      if (typeof scheduleSync === 'function') scheduleSync();
+    }
+  },
   del(k) { try { localStorage.removeItem('consoler:' + k); } catch (e) { /* idem */ } },
 };
 const THEMES = ['auto', 'light', 'dark'], THEME_NAMES = { auto: 'auto', light: 'clair', dark: 'sombre' };
@@ -636,7 +647,7 @@ $('#hi-list').addEventListener('click', async (ev) => {
   else if (a === 'copy') {
     try { await navigator.clipboard.writeText(e.code); toast('Copié'); } catch (err) { toast('Copie impossible'); }
   } else if (a === 'del' && confirm('Supprimer ce script de l’historique ?')) {
-    sessions.splice(+it.dataset.i, 1); saveSessions(); renderHistory();
+    markDeleted('sessionsDel', [e.id]); sessions.splice(+it.dataset.i, 1); saveSessions(); renderHistory();
   }
 });
 function historyAsR() {
@@ -646,7 +657,7 @@ function historyAsR() {
 $('#hi-export').addEventListener('click', () => saveFile(`historique_${stamp()}.R`, historyAsR(), 'text/plain'));
 $('#hi-clear').addEventListener('click', () => {
   if (!sessions.length || !confirm('Effacer tout l’historique ?')) return;
-  sessions.length = 0; scriptSid = newSid(); consoleSid = newSid(); syncSheet(); saveSessions(); renderHistory();
+  markDeleted('sessionsDel', sessions.map((x) => x.id)); sessions.length = 0; scriptSid = newSid(); consoleSid = newSid(); syncSheet(); saveSessions(); renderHistory();
 });
 
 // ------------------------------------------------------------------ mes scripts, notes, exports
@@ -694,7 +705,7 @@ $('#fi-scripts').addEventListener('click', (e) => {
   }
   else if (a === 'dl') saveFile(`${n}.R`, scripts[n].code, 'text/plain');
   else if (a === 'del' && confirm(`Supprimer le script « ${n} » ?`)) {
-    delete scripts[n]; store.set('scripts', scripts);
+    markDeleted('scriptsDel', [n]); delete scripts[n]; store.set('scripts', scripts);
     sheets.forEach((x) => { if (x.linked === n) x.linked = ''; });
     if (n === current) setCurrent('');
     syncSheet(); renderScripts();
@@ -788,6 +799,8 @@ $('#fi-rfiles').addEventListener('click', async (e) => {
 // ------------------------------------------------------------------ feuilles de script (onglets)
 // Plusieurs scripts ouverts en même temps, comme les onglets de RStudio. Chaque feuille a sa propre entrée d'historique.
 const sheets = store.get('sheets', null) || [{ id: newSid(), n: 1, code: store.get('script', DEFAULT_SCRIPT), linked: current, sid: scriptSid }];
+// premier lancement : l'onglet par défaut est enregistré sans date, pour qu'une progression en ligne plus ancienne l'emporte
+if (!store.get('sheets', null)) { syncState.applying = true; store.set('sheets', sheets); syncState.applying = false; }
 let active = store.get('activeSheet', '');
 if (!sheets.some((x) => x.id === active)) active = sheets[0].id;
 const sheet = () => sheets.find((x) => x.id === active);
@@ -800,7 +813,8 @@ function sheetTitle(x) {
 function syncSheet() {
   const x = sheet(); if (!x) return;
   x.code = editor.value; x.linked = current; x.sid = scriptSid;
-  store.set('sheets', sheets);
+  // n'écrit (et ne date) que si quelque chose a changé : la fusion garde ainsi la version la plus récente
+  if (JSON.stringify(sheets) !== localStorage.getItem('consoler:sheets')) store.set('sheets', sheets);
   store.set('activeSheet', active);
   renderTabs();
 }
@@ -1047,6 +1061,158 @@ renderMail();
 if (store.get('acEmail', '') && Date.now() - store.get('lastMail', 0) > 7 * DAY && (Object.keys(scripts).length || sessions.length > 3)) {
   setTimeout(() => toast('Pensez à vous envoyer une sauvegarde (Fichiers → Sauvegarde par e-mail)'), 4000);
 }
+
+// ------------------------------------------------------------------ compte et progression en ligne
+// Comme Éloquence : on se connecte avec son e-mail (code à 6 chiffres), la progression est sauvegardée en ligne
+// quelques secondes après chaque modification et retrouvée sur tous les appareils. Fusion : scripts et historique
+// entrée par entrée (la plus récente gagne, les suppressions suivent) ; notes, onglets, commandes et paquets en bloc.
+function markDeleted(key, ids) {
+  const del = store.get(key, {}); const now = Date.now();
+  for (const id of ids) del[id] = now;
+  store.set(key, del);
+}
+const mtime = (k) => Number(localStorage.getItem('consoler:mt:' + k) || 0);
+function localDoc() {
+  const d = { v: 1 };
+  for (const k of SYNCED) d[k] = { t: mtime(k), v: store.get(k, null) };
+  return d;
+}
+function mergeDocs(a, b) {
+  const pick = (k) => ((b[k] && b[k].t > (a[k] ? a[k].t : 0)) ? b[k] : a[k] || b[k] || { t: 0, v: null });
+  const m = { v: 1 };
+  for (const k of SYNCED) m[k] = pick(k);
+  const delMerge = (k) => {
+    const out = { ...(a[k] && a[k].v) }; for (const [id, t] of Object.entries((b[k] && b[k].v) || {})) out[id] = Math.max(out[id] || 0, t);
+    return { t: Math.max(a[k] ? a[k].t : 0, b[k] ? b[k].t : 0), v: out };
+  };
+  m.scriptsDel = delMerge('scriptsDel'); m.sessionsDel = delMerge('sessionsDel');
+  const sc = { ...((a.scripts && a.scripts.v) || {}) };
+  for (const [n, x] of Object.entries((b.scripts && b.scripts.v) || {})) if (!sc[n] || x.t > sc[n].t) sc[n] = x;
+  for (const n of Object.keys(sc)) if ((m.scriptsDel.v[n] || 0) >= sc[n].t) delete sc[n];
+  m.scripts = { t: Math.max(a.scripts ? a.scripts.t : 0, b.scripts ? b.scripts.t : 0), v: sc };
+  const se = new Map();
+  for (const x of [...((a.sessions && a.sessions.v) || []), ...((b.sessions && b.sessions.v) || [])]) if (!se.has(x.id) || x.t > se.get(x.id).t) se.set(x.id, x);
+  const list = [...se.values()].filter((x) => !m.sessionsDel.v[x.id]).sort((x, y) => x.t - y.t).slice(-300);
+  m.sessions = { t: Math.max(a.sessions ? a.sessions.t : 0, b.sessions ? b.sessions.t : 0), v: list };
+  return m;
+}
+function applyDoc(m) {
+  syncState.applying = true;
+  try {
+    for (const k of SYNCED) {
+      if (!m[k] || m[k].v === null) continue;
+      store.set(k, m[k].v);
+      try { localStorage.setItem('consoler:mt:' + k, String(m[k].t)); } catch (e) { /* ignoré */ }
+    }
+    for (const n of Object.keys(scripts)) delete scripts[n];
+    Object.assign(scripts, m.scripts.v || {});
+    sessions.splice(0, sessions.length, ...(m.sessions.v || []));
+    if (m.cmds.v) { cmds.splice(0, cmds.length, ...m.cmds.v); hIdx = cmds.length; }
+    if (m.pkgs.v) { wanted.clear(); m.pkgs.v.forEach((x) => wanted.add(x)); }
+    if (m.notes.v !== null && document.activeElement !== notes) notes.value = m.notes.v;
+    if (m.sheets.v && m.sheets.v.length && document.activeElement !== editor) {
+      sheets.splice(0, sheets.length, ...m.sheets.v);
+      loadSheet(sheets.some((x) => x.id === active) ? active : sheets[0].id);
+    }
+  } finally { syncState.applying = false; }
+  renderScripts();
+  if (main.dataset.view === 'hist') renderHistory();
+}
+const summary = () => ({ scripts: Object.keys(scripts).length, tabs: sheets.length, history: sessions.length, packages: wanted.size });
+let syncTimer = 0, syncBusy = false, syncAgain = false, lastSync = 0, syncErr = '', hasServer = false;
+function scheduleSync(delay = 4000) {
+  if (!hasServer || !cloud.user()) return;
+  clearTimeout(syncTimer); syncTimer = setTimeout(syncNow, delay);
+}
+// remote : progression déjà reçue (connexion) ; sinon elle est relue sur le serveur
+async function syncNow(remote) {
+  if (!hasServer || !cloud.user()) return;
+  if (syncBusy) { syncAgain = true; return; }
+  syncBusy = true; renderAccount('Sauvegarde…');
+  try {
+    snapshotScript(); syncSheet();
+    if (remote === undefined || remote instanceof Event) remote = await cloud.pull();
+    const merged = remote && remote.v ? mergeDocs(localDoc(), remote) : localDoc();
+    if (remote && remote.v) applyDoc(merged);
+    if (JSON.stringify(merged) !== JSON.stringify(remote)) await cloud.push(merged, summary());
+    lastSync = Date.now(); syncErr = '';
+  } catch (e) {
+    syncErr = cloud.errorText(e);
+    if (!cloud.user()) { renderAccount(); showGate(); }
+  } finally {
+    syncBusy = false; renderAccount();
+    if (syncAgain) { syncAgain = false; scheduleSync(1000); }
+  }
+}
+function renderAccount(state) {
+  const on = hasServer && !!cloud.user();
+  $('#ac').hidden = !hasServer;
+  $('#ml').hidden = hasServer; // sans serveur : sauvegarde par e-mail en pièce jointe
+  $('#ac-off').hidden = on;
+  $('#ac-on').hidden = !on;
+  if (!on) return;
+  $('#ac-who').textContent = cloud.user().email;
+  const st = $('#ac-state');
+  st.className = syncErr && !state ? 'bad' : '';
+  st.textContent = state || (syncErr ? `Sauvegarde en attente : ${syncErr}`
+    : lastSync ? `Progression sauvegardée à ${fmtTime(lastSync)} · automatique` : 'Sauvegarde automatique activée');
+}
+
+// Formulaire de connexion (onglet Fichiers et écran d'accueil) : e-mail → code à 6 chiffres
+function wireLogin(root) {
+  const q = (sel) => root.querySelector(sel);
+  const msg = (t) => { q('.lg-msg').textContent = t; };
+  let email = '';
+  q('.lg-email').value = store.get('acEmail', '');
+  q('.lg-send').addEventListener('click', async () => {
+    email = q('.lg-email').value.trim();
+    if (!/^\S+@\S+\.\S+$/.test(email)) { msg('Adresse e-mail invalide.'); q('.lg-email').focus(); return; }
+    q('.lg-send').disabled = true; msg('Envoi du code…');
+    try {
+      await cloud.sendCode(email); store.set('acEmail', email);
+      q('.lg-code-row').hidden = false; q('.lg-code').focus();
+      msg(`Code envoyé à ${email}. Pensez à regarder dans les spams.`);
+    } catch (e) { msg(cloud.errorText(e)); }
+    finally { q('.lg-send').disabled = false; }
+  });
+  const verify = async () => {
+    const code = q('.lg-code').value.replace(/\D/g, '');
+    if (code.length !== 6) { msg('Le code doit comporter 6 chiffres.'); q('.lg-code').focus(); return; }
+    q('.lg-verify').disabled = true; msg('Vérification…');
+    try {
+      const { state, isNew } = await cloud.verifyCode(email || q('.lg-email').value.trim(), code);
+      q('.lg-code').value = ''; q('.lg-code-row').hidden = true; msg('');
+      hideGate(); toast(isNew ? 'Compte créé : votre progression est sauvegardée en ligne' : 'Connecté : progression récupérée');
+      await syncNow(state);
+    } catch (e) { msg(cloud.errorText(e)); }
+    finally { q('.lg-verify').disabled = false; renderAccount(); }
+  };
+  q('.lg-verify').addEventListener('click', verify);
+  q('.lg-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); verify(); } });
+  q('.lg-code').addEventListener('input', () => { if (q('.lg-code').value.replace(/\D/g, '').length === 6) verify(); });
+}
+wireLogin($('#ac-off'));
+wireLogin($('#gate'));
+function showGate() { if (hasServer && !cloud.user()) $('#gate').hidden = false; }
+function hideGate() { $('#gate').hidden = true; }
+$('#gate-skip').addEventListener('click', () => { store.set('gateSkipped', true); hideGate(); });
+$('#ac-sync').addEventListener('click', () => syncNow());
+$('#ac-out').addEventListener('click', async () => {
+  if (!confirm('Se déconnecter ? Votre progression reste sauvegardée en ligne et sur ce téléphone.')) return;
+  await syncNow(); await cloud.logout(); lastSync = 0; renderAccount();
+});
+addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') { if (syncTimer) { clearTimeout(syncTimer); syncNow(); } }
+  else if (Date.now() - lastSync > 60e3) scheduleSync(500);
+});
+addEventListener('online', () => scheduleSync(500));
+cloud.available().then((ok) => {
+  hasServer = ok; renderAccount();
+  if (!ok) return;
+  if (cloud.user()) scheduleSync(300);
+  else if (!store.get('gateSkipped', false)) showGate();
+});
+renderAccount();
 
 // ------------------------------------------------------------------ lancement
 if ('serviceWorker' in navigator && isSecureContext) {

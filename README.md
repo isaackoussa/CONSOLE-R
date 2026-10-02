@@ -35,23 +35,35 @@ R complet dans le navigateur, pensé pour le téléphone. R 4 est compilé en We
 
 Le premier lancement télécharge R (~25 Mo) ; le service worker garde R et les paquets installés en cache,
 l’application fonctionne ensuite hors ligne. Limites : un calcul sans fin ne peut pas être interrompu
-(« Redémarrer R » dans le menu ⋯) ; scripts, notes et historique sont stockés dans le navigateur — faites
-régulièrement une sauvegarde par e-mail.
+(« Redémarrer R » dans le menu ⋯) ; sans compte, scripts, notes et historique ne sont stockés que dans le navigateur.
 
-## Sauvegarde par e-mail
+## Compte et progression (e-mail)
 
-Onglet **Fichiers → Sauvegarde par e-mail** : on enregistre son adresse une fois, puis « M’envoyer ma sauvegarde »
-prépare un e-mail avec toute la progression en pièce jointe (`.json` : scripts, onglets, notes, historique, paquets).
-Sur téléphone, la feuille de partage s’ouvre (choisir Gmail, Outlook…) ; sur ordinateur, le fichier est téléchargé et
-un e-mail prérempli s’ouvre. Pour retrouver sa progression (autre téléphone, réinstallation) : **Fichiers →
-Restaurer une sauvegarde**, puis choisir la pièce jointe. Aucun compte ni serveur ; un rappel s’affiche si la
-dernière sauvegarde date de plus d’une semaine.
+Comme Éloquence, Anglais 365 et MasterGraf : au premier lancement, on entre son **e-mail** et un **code à 6 chiffres**
+reçu par e-mail (envoyé par Brevo), sans mot de passe. La progression — scripts, onglets ouverts, notes, historique,
+paquets — est alors **sauvegardée en ligne automatiquement** (Netlify Blobs) quelques secondes après chaque
+modification, et retrouvée sur tous les appareils connectés avec le même e-mail. Fusion : pour chaque script et chaque
+entrée d’historique, la version la plus récente l’emporte ; les suppressions suivent. « Continuer sans compte » reste
+possible (progression sur l’appareil seulement).
+
+Le compte nécessite l’hébergement **Netlify** (fonctions `netlify/functions/*`). Variables d’environnement du site Netlify :
+
+| Variable | Rôle |
+|---|---|
+| `BREVO_API_KEY` | clé API Brevo (la même que pour Éloquence) |
+| `MAIL_FROM` | adresse d’expéditeur validée dans Brevo |
+| `MAIL_FROM_NAME` | nom d’expéditeur (facultatif, « Console R » par défaut) |
+
+Sur GitHub Pages (sans serveur), l’application fonctionne sans compte et propose à la place une **sauvegarde par
+e-mail** : la progression part en pièce jointe, restaurable avec *Fichiers → Restaurer une sauvegarde*.
+
+Test en local avec les vraies fonctions (e-mails simulés, code affiché dans le terminal) : `npm install` puis `npm run dev`.
 
 ## Publier et installer sur le téléphone
 
-1. Sur GitHub : **Settings → Pages → Branch : `main`, dossier `/ (root)`**.
-   L’adresse sera `https://isaackoussa.github.io/CONSOLE-R/`.
-2. Ouvrir cette adresse puis :
+1. **Netlify** (avec compte) : nouveau site relié au dépôt `CONSOLE-R` (la configuration est dans `netlify.toml`),
+   puis les variables Brevo ci-dessus. Ou **GitHub Pages** (sans compte) : *Settings → Pages → Branch : `main`, `/ (root)`*.
+2. Ouvrir l’adresse du site puis :
    - **Android / Chrome** : menu ⋮ → *Installer l’application* (ou menu ⋯ de la console → « Installer l’application ») ;
    - **iPhone / iPad (Safari)** : *Partager* → *Sur l’écran d’accueil*.
 
@@ -71,6 +83,10 @@ index.html            coque de l'application (onglets Script, Console, Historiqu
 css/app.css           thème clair/sombre, mise en page mobile
 js/app.js             démarrage de webR, exécution, graphiques, onglets de scripts, historique, fichiers, paquets
 sw.js                 service worker (hors ligne, cache de R et des paquets)
+js/cloud.js           compte : code e-mail, sauvegarde et lecture de la progression
+netlify/functions/    API : envoi du code, vérification, progression, compte
+netlify/lib/          stockage (Netlify Blobs), e-mails Brevo
+tests/serveur-local.mts  serveur de test local (npm run dev)
 manifest.webmanifest  application installable
 icons/                icônes
 ```

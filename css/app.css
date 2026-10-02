@@ -58,7 +58,7 @@ body {
 a { color: var(--accent); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
-select, input[type="text"], input[type="search"], textarea {
+select, input[type="text"], input[type="search"], input[type="email"], textarea {
   font: inherit; font-size: 16px; color: var(--ink); background: var(--panel); border: 1px solid var(--line);
   border-radius: 5px; padding: 6px 8px; min-width: 0; max-width: 100%;
 }
@@ -285,3 +285,22 @@ body.rc {
 .ac-row { position: static; padding: 0; margin: 8px 0 0; background: none; }
 .ac-row input { min-width: 0; }
 #ml-state { margin-top: 6px; }
+
+/* ------------------------------------------------ Compte */
+#ac[hidden], #ml[hidden] { display: none; }
+.ac-card { flex-wrap: wrap; border-color: var(--good); }
+.ac-card small.bad { color: var(--warn); }
+.gate {
+  position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 20px;
+  background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(6px);
+}
+.gate[hidden] { display: none; }
+.gate-card {
+  width: min(420px, 100%); display: grid; gap: 10px; justify-items: center; text-align: center; padding: 26px 20px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 22px; box-shadow: 0 20px 60px rgb(0 0 0 / 0.25);
+}
+.gate-card h1 { margin: 4px 0 0; font-family: var(--f-display); font-size: 26px; }
+.gate-card p { margin: 0; color: var(--ink-2); font-size: 15px; line-height: 1.5; }
+.gate-card .ac-row { width: 100%; }
+.gate-skip { border: 0; font-size: 14px; color: var(--ink-3); }
+.lg-code-row[hidden] { display: none; }

@@ -3,10 +3,10 @@
  * Fichiers de l'application : cache d'abord. R (webR) et ses paquets : cache séparé, conservé entre versions.
  * Changer VERSION à chaque publication pour forcer la mise à jour des fichiers de l'application.
  */
-const VERSION = 'console-r-v7';
+const VERSION = 'console-r-v8';
 const RUNTIME = 'console-r-runtime';
 const SHELL = [
-  './', 'index.html', 'manifest.webmanifest', 'css/app.css', 'js/app.js',
+  './', 'index.html', 'manifest.webmanifest', 'css/app.css', 'js/app.js', 'js/cloud.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png', 'icons/apple-touch-icon.png',
 ];
 
@@ -23,6 +23,7 @@ self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
+  if (url.origin === location.origin && url.pathname.includes('/api/')) return; // compte : toujours le réseau
   if (url.origin !== location.origin) {
     // Les fichiers d'une version donnée de webR et des paquets ne changent pas : cache d'abord.
     // L'index du dépôt (PACKAGES) et le reste (polices) : réseau d'abord, cache en secours.

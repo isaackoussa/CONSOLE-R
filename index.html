@@ -71,6 +71,20 @@
   </section>
   <section class="rc-pane" id="pane-files" aria-labelledby="tab-files">
     <div class="pk">
+      <div id="ac" hidden>
+        <h2>Compte et progression</h2>
+        <div id="ac-off">
+          <p class="pk-hint">Connectez-vous avec votre e-mail : scripts, onglets, notes, historique et paquets sont sauvegardés en ligne
+            automatiquement et retrouvés sur tous vos appareils. Pas de mot de passe : un code à 6 chiffres vous est envoyé.</p>
+          <div class="pk-search ac-row"><input type="email" class="lg-email" placeholder="votre@email.com" autocomplete="email" autocapitalize="off" spellcheck="false" aria-label="Adresse e-mail"><button type="button" class="lg-send">Recevoir un code</button></div>
+          <div class="pk-search ac-row lg-code-row" hidden><input type="text" class="lg-code" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="Code à 6 chiffres" aria-label="Code reçu par e-mail"><button type="button" class="lg-verify">Valider</button></div>
+          <p class="pk-hint lg-msg" role="status"></p>
+        </div>
+        <div id="ac-on" hidden>
+          <div class="fi-row ac-card"><div class="fi-main"><b id="ac-who"></b><small id="ac-state"></small></div>
+            <button type="button" id="ac-sync">Sauvegarder</button><button type="button" class="ghost" id="ac-out">Déconnexion</button></div>
+        </div>
+      </div>
       <div id="ml">
         <h2>Sauvegarde par e-mail</h2>
         <p class="pk-hint">Votre progression (scripts, onglets, notes, historique, paquets) part en pièce jointe vers votre e-mail.
@@ -128,6 +142,18 @@
     </div>
   </section>
 </main>
+<div class="gate" id="gate" hidden role="dialog" aria-modal="true" aria-labelledby="gate-title">
+  <div class="gate-card">
+    <img class="app-icon" src="icons/icon.svg" alt="" width="64" height="64">
+    <h1 id="gate-title">Console R</h1>
+    <p>R complet dans votre téléphone. Entrez votre e-mail pour que votre progression (scripts, notes, historique, paquets)
+      soit sauvegardée et vous suive sur tous vos appareils.</p>
+    <div class="pk-search ac-row"><input type="email" class="lg-email" placeholder="votre@email.com" autocomplete="email" autocapitalize="off" spellcheck="false" aria-label="Adresse e-mail"><button type="button" class="lg-send">Recevoir un code</button></div>
+    <div class="pk-search ac-row lg-code-row" hidden><input type="text" class="lg-code" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="Code à 6 chiffres" aria-label="Code reçu par e-mail"><button type="button" class="lg-verify">Valider</button></div>
+    <p class="pk-hint lg-msg" role="status"></p>
+    <button type="button" class="ghost gate-skip" id="gate-skip">Continuer sans compte</button>
+  </div>
+</div>
 <div class="rc-keys" id="rc-keys" aria-label="Touches R"></div>
 <nav class="rc-nav" role="tablist" aria-label="Vue">
   <button type="button" role="tab" id="tab-script" data-view="script" aria-controls="pane-script"><svg viewBox="0 0 24 24"><path d="M5 3h10l4 4v14H5z M14 3v5h5 M8 12h8 M8 16h6"/></svg>Script</button>
